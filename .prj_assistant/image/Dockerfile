@@ -13,7 +13,7 @@
 #   scopes-test   — SearchScopes uses abbreviatingWithTildeInPath, Darwin-only Foundation
 #   clipboard-test / custom-command-test — need the SQLite3 module and Darwin
 
-ARG BASE_IMAGE=ghcr.io/pandazxx/codex-slack-agent-minimal:latest
+ARG BASE_IMAGE=ghcr.io/pandazxx/codex-slack-agent-minimal:v4.19-rc16
 ARG SWIFT_VERSION=6.3.3
 # swift.org publishes no Debian 13 build; the Debian 12 tarball runs fine on trixie's glibc 2.41.
 ARG SWIFT_PLATFORM=debian12
