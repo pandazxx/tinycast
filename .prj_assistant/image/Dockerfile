@@ -111,17 +111,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /opt/swift /opt/swift
 COPY --from=builder /out/ /tmp/xcg/
 
+# The xcodegen binary alone is not enough. Without SettingPresets it still exits 0, but silently
+# emits a project stripped of ~98 inherited build settings, SDKROOT among them. It resolves them
+# against `Bundle.main.bundlePath/../share/xcodegen`, which for /usr/local/bin/xcodegen means
+# /usr/local/share/xcodegen — hence that path below.
+# Keep comments out of the RUN body: an indented comment inside a line continuation breaks the
+# instruction, which is what silently reverted this image to the bare base once already.
 RUN set -eux; \
     ln -s /opt/swift/usr/bin/swift /usr/local/bin/swift; \
     ln -s /opt/swift/usr/bin/swiftc /usr/local/bin/swiftc; \
     if [ -x /tmp/xcg/xcodegen ]; then \
       install -m 0755 /tmp/xcg/xcodegen /usr/local/bin/xcodegen; \
-      # The binary alone is not enough. Without these presets xcodegen still exits 0, but silently
-      # emits a project stripped of ~98 inherited build settings, SDKROOT among them. It resolves
-      # them against `Bundle.main.bundlePath/../share/xcodegen`, which for /usr/local/bin/xcodegen
-      # means exactly this path.
       mkdir -p /usr/local/share/xcodegen; \
       cp -r /tmp/xcg/SettingPresets /usr/local/share/xcodegen/SettingPresets; \
+      test -f /usr/local/share/xcodegen/SettingPresets/base.yml; \
+      xcodegen --version; \
     fi; \
     rm -rf /tmp/xcg; \
     swiftc --version
