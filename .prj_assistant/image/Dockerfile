@@ -5,13 +5,16 @@
 # which Apple ships only for macOS — so the app build, and every harness that reaches AppKit,
 # Combine, SQLite3 or Darwin, belongs on a macos-26 GitHub Actions runner.
 #
-# Confirmed working with this toolchain on this base:
-#   swiftc Tinycast/Core/Calculator/*.swift Tools/calc-test.swift   -> 426 passed, 0 failed
-#   swift Tools/fuzz-test.swift                                     -> ALL PASSED
-# Expected to keep failing here, by design rather than by accident:
-#   ranking-test  — LauncherRankingStore imports Combine, which does not exist on Linux
+# Verified in a container built from this file — 3 of the 7 harnesses in Tools/ run here:
+#   calc-test   -> 426 passed, 0 failed
+#   fuzz-test   -> ALL PASSED
+#   emoji-test  -> all checks passed (2054 records)
+# The other 4 fail by design rather than by accident, and no amount of image work fixes them:
+#   ranking-test / custom-command-test — their sources import Combine, absent on Linux
 #   scopes-test   — SearchScopes uses abbreviatingWithTildeInPath, Darwin-only Foundation
-#   clipboard-test / custom-command-test — need the SQLite3 module and Darwin
+#   clipboard-test — needs the SQLite3 module
+#
+# `xcodegen generate` also runs here, and reproduces the committed project.pbxproj byte for byte.
 
 ARG BASE_IMAGE=ghcr.io/pandazxx/codex-slack-agent-minimal:v4.19-rc16
 ARG SWIFT_VERSION=6.3.3
@@ -56,9 +59,8 @@ RUN set -eux; \
     /opt/swift/usr/bin/swiftc --version
 
 # XcodeGen regenerates the committed Tinycast.xcodeproj after project.yml changes or new source
-# files. Upstream runs a Linux CI job, so this is expected to work — but it is the one step not
-# verified locally, so a failure is tolerated rather than fatal: a broken build here would block
-# the whole workspace, and everything else in this image is independently useful.
+# files. A failure is tolerated rather than fatal: a broken build here would block the whole
+# workspace, and everything else in this image is independently useful.
 RUN set -eux; \
     mkdir -p /out; \
     export PATH="/opt/swift/usr/bin:$PATH"; \
@@ -66,6 +68,7 @@ RUN set -eux; \
          https://github.com/yonaskolb/XcodeGen.git /tmp/XcodeGen \
        && swift build -c release --package-path /tmp/XcodeGen --scratch-path /tmp/xcg-build; then \
       cp /tmp/xcg-build/release/xcodegen /out/xcodegen; \
+      cp -r /tmp/XcodeGen/SettingPresets /out/SettingPresets; \
       echo "xcodegen ${XCODEGEN_VERSION} built"; \
     else \
       echo "WARNING: XcodeGen ${XCODEGEN_VERSION} failed to build — image ships without it."; \
@@ -113,8 +116,18 @@ RUN set -eux; \
     ln -s /opt/swift/usr/bin/swiftc /usr/local/bin/swiftc; \
     if [ -x /tmp/xcg/xcodegen ]; then \
       install -m 0755 /tmp/xcg/xcodegen /usr/local/bin/xcodegen; \
+      # The binary alone is not enough. Without these presets xcodegen still exits 0, but silently
+      # emits a project stripped of ~98 inherited build settings, SDKROOT among them. It resolves
+      # them against `Bundle.main.bundlePath/../share/xcodegen`, which for /usr/local/bin/xcodegen
+      # means exactly this path.
+      mkdir -p /usr/local/share/xcodegen; \
+      cp -r /tmp/xcg/SettingPresets /usr/local/share/xcodegen/SettingPresets; \
     fi; \
     rm -rf /tmp/xcg; \
     swiftc --version
+
+# XcodeGen reads the current user via NSUserName(); on Linux that consults $USER, which the
+# runtime does not set, and it aborts with "Couldn't find current username" before writing.
+ENV USER=appuser
 
 USER appuser
