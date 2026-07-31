@@ -81,6 +81,13 @@ struct DictionaryTest {
         // one sense with a sub-sense bullet, no trailers
         let quickly = "quickly quick·ly | ˈkwiklē | adverb at a fast speed; rapidly: Reg's illness progressed frighteningly quickly. • with little or no delay; promptly: we moved quickly to deal with our auditor's questions."
 
+        // part-of-speech words used as ordinary prose mid-sense, plus a two-word part of speech
+        let her = "her | hər, (h)ər | pronoun [third person singular] 1 used as the object of a verb or preposition to refer to a female person or animal previously mentioned or easily identified. Compare with she: she knew I hated her | I told Hannah I would wait for her. • referring to a ship, country, or other inanimate thing regarded as female: the crew tried to sail her through a narrow gap. • often used in place of “she” after the verb “to be” and after “than” or “as” to refer to a female person or animal: it must be her | he was younger than her. 2 archaic, or dialect herself: peevishly she flung her on her face. possessive determiner 1 belonging to or associated with a female person or animal previously mentioned or easily identified: Patricia loved her job | how the mother crane treats her babies. • belonging to or associated with a ship, country, or other inanimate thing regarded as female: at her launch, she was the ultimate in luxury transatlantic travel. 2 (Her) used in titles: Her Royal Highness. USAGE On whether her or she is the correct pronoun in a comparative construction (“younger than her” or “younger than she”?), see personal pronoun and than ORIGIN Old English hire, genitive and dative of hīo, hēo ‘she’."
+        // no numbered senses; bullets only, across two parts of speech
+        let he = "he | hē | pronoun [third person singular] used to refer to a man, boy, or male animal previously mentioned or easily identified: everyone liked my father—he was the perfect gentleman. • used to refer to a person or animal of unspecified sex (in modern use, now chiefly replaced by “he or she” or “they”): every child needs to know that he is loved. • any person (in modern use, now chiefly replaced by “anyone” or “the person”): he who is silent consents. noun [in singular] a male; a man: is that a he or a she?. • [in combination] male: a he-goat. USAGE Until recently, he was used to refer to a person of unspecified sex, as in ‘every child needs to know that he is loved’, but this is now generally regarded as old-fashioned or sexist. ORIGIN Old English he, hē, of Germanic origin; related to Dutch hij."
+        // a homograph number in the headword slot
+        let ha = "ha 1 | hä | (also hah) exclamation used to express surprise, suspicion, triumph, or some other emotion: Ha! That'll teach you!. ORIGIN natural utterance: first recorded in Middle English."
+
         // hello: three parts of speech, each with a single sense.
         let h = DefinitionParser.parse(hello, term: "hello")
         check("hello headword drops the syllabified duplicate", h.headword == "hello")
@@ -151,6 +158,39 @@ struct DictionaryTest {
         let q = DefinitionParser.parse(quickly, term: "quickly")
         check("quickly is one adverb sense", q.sections.map { $0.partOfSpeech } == ["adverb"])
         check("quickly drops the sub-sense", q.sections[0].senses == ["at a fast speed; rapidly"])
+
+        // her: the phantom-section case. "used as the object of a verb or preposition" must not
+        // split, and "possessive determiner" must not be lost to the bare "determiner" it contains.
+        let herEntry = DefinitionParser.parse(her, term: "her")
+        check("her headword", herEntry.headword == "her")
+        check(
+            "her has exactly two parts of speech",
+            herEntry.sections.map { $0.partOfSpeech } == ["pronoun", "possessive determiner"])
+        check(
+            "prose mentions of verb/preposition do not split a sense",
+            herEntry.sections[0].senses.first?.hasPrefix(
+                "used as the object of a verb or preposition") == true)
+        check("her pronoun has two numbered senses", herEntry.sections[0].senses.count == 2)
+        check(
+            "her possessive determiner survives", herEntry.sections[1].senses.count == 2)
+
+        // he: bullets and no numbering, across two parts of speech.
+        let heEntry = DefinitionParser.parse(he, term: "he")
+        check("he has pronoun then noun", heEntry.sections.map { $0.partOfSpeech } == ["pronoun", "noun"])
+        check(
+            "he pronoun sense drops its example and grammar label",
+            heEntry.sections[0].senses
+                == ["used to refer to a man, boy, or male animal previously mentioned or easily identified"])
+        check("he noun sense", heEntry.sections[1].senses == ["a male; a man"])
+
+        // ha: `ha 1` is the first of several entries for the spelling, not a headword called "ha 1".
+        let haEntry = DefinitionParser.parse(ha, term: "ha")
+        check("homograph number is dropped from the headword", haEntry.headword == "ha")
+        check("ha is one exclamation", haEntry.sections.map { $0.partOfSpeech } == ["exclamation"])
+        check(
+            "ha sense drops its example",
+            haEntry.sections[0].senses
+                == ["used to express surprise, suspicion, triumph, or some other emotion"])
 
         // Degenerate input must still produce something displayable rather than crash or vanish.
         let empty = DefinitionParser.parse("", term: "zzz")

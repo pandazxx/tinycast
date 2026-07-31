@@ -48,9 +48,13 @@ enum DefinitionParser {
         "exclamation", "interjection", "noun", "particle", "prefix", "preposition", "pronoun",
         "suffix", "symbol", "verb",
     ]
+    /// Longer forms have to be listed, not derived: `her` labels its second half "possessive
+    /// determiner", and matching the bare "determiner" would fail the preceding-punctuation check
+    /// and lose the whole section.
     private static let twoWordPartsOfSpeech: Set<String> = [
         "plural noun", "proper noun", "combining form", "auxiliary verb", "modal verb",
-        "definite article", "indefinite article",
+        "definite article", "indefinite article", "possessive determiner", "possessive pronoun",
+        "possessive adjective", "reflexive pronoun", "relative pronoun",
     ]
 
     static func parse(_ raw: String, term: String) -> Definition {
@@ -97,9 +101,13 @@ enum DefinitionParser {
         return (headword, pronunciation.isEmpty ? nil : pronunciation, body)
     }
 
-    /// Drops the syllabified duplicate (`apple ap·ple` → `apple`) so the card doesn't say it twice.
+    /// Drops the syllabified duplicate (`apple ap·ple` → `apple`) so the card doesn't say it twice,
+    /// and the homograph number that marks one of several entries for a spelling (`ha 1` → `ha`).
     private static func cleanHeadword(_ area: String) -> String? {
-        let words = area.split(separator: " ").filter { !$0.contains("·") }
+        var words = area.split(separator: " ").filter { !$0.contains("·") }
+        if words.count > 1, let last = words.last, last.allSatisfy(\.isNumber) {
+            words.removeLast()
+        }
         let headword = words.joined(separator: " ").trimmingCharacters(in: .whitespaces)
         return headword.isEmpty ? nil : headword
     }

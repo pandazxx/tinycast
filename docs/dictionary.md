@@ -46,6 +46,11 @@ DCSCopyTextDefinition(nil, word as CFString, CFRange(location: 0, length: word.u
 <headword> [<syl·la·bi·fied>] | <pronunciation> | [<variants>] [<part of speech>] <senses> [<trailers>]
 ```
 
+Two wrinkles the captures exposed: a part of speech can be two words (`her` labels its second half
+`possessive determiner`, and matching the bare `determiner` inside it loses the section), and the
+headword slot can carry a homograph number (`ha 1` is the first of several entries for that spelling,
+not a word called "ha 1").
+
 *The whole entry is a single line — there are no newlines anywhere.* Sections have to be recovered
 from vocabulary, not whitespace. Everything past the headword is optional: `New York` has no part of
 speech and goes straight to numbered senses, `run` has no syllabified form, `quickly` has neither
@@ -59,6 +64,9 @@ Two facts drive the parser:
   them removes 57% and 74% of those entries — and none of it is the definition.
 - **Sequential numbering is what makes sense-splitting safe.** Requiring the *next expected* integer
   is why `1664`, `$1,300` and `population 19,490,297` aren't mistaken for sense markers.
+- **A part of speech only opens a section after a sense ends.** `her` defines its pronoun as "used as
+  the object of a *verb* or *preposition* to refer to…"; mid-sentence those are ordinary words, and
+  treating them as markers split one section into five.
 
 The parser is still **best-effort with a raw fallback**: anything it can't structure comes back as a
 single unlabelled section holding the text verbatim, so `sections` is never empty and the view has no
