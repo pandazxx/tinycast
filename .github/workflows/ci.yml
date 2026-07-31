@@ -1,0 +1,124 @@
+name: CI
+
+# Build and test verification for every pull request. The release pipeline lives in release.yml and
+# is manually dispatched; this is the gate that runs on its own.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push supersedes an in-flight run for the same ref. Never cancel main — those runs are the
+# record of whether the branch is green.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      # Pinned rather than `brew install xcodegen`: the drift check below compares generated output
+      # byte for byte, so a newer XcodeGen formatting the project differently would fail the build
+      # for a reason that has nothing to do with the change under test.
+      XCODEGEN_VERSION: "2.46.0"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select Xcode 26
+        run: |
+          XCODE_PATH="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n1)"
+          if [ -z "$XCODE_PATH" ]; then
+            echo "::error::No Xcode 26.x found on this runner. Installed Xcodes:"
+            ls /Applications | grep -i xcode || true
+            exit 1
+          fi
+          echo "Using $XCODE_PATH"
+          echo "DEVELOPER_DIR=$XCODE_PATH/Contents/Developer" >> "$GITHUB_ENV"
+
+      # Tinycast.xcodeproj is generated from project.yml but committed, so the two can silently drift
+      # — most easily by adding a source file and forgetting to regenerate. Regenerating and
+      # diffing catches that here instead of in a build failure on someone else's machine.
+      - name: Check Tinycast.xcodeproj is in sync with project.yml
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip"
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP"
+          # Run from bin/ so XcodeGen resolves its SettingPresets at ../share/xcodegen. Invoking the
+          # binary from elsewhere silently drops ~98 inherited build settings, SDKROOT included.
+          "$RUNNER_TEMP/xcodegen/bin/xcodegen" generate --spec project.yml
+          if ! git diff --exit-code -- Tinycast.xcodeproj; then
+            echo "::error::Tinycast.xcodeproj is out of date. Run 'xcodegen generate' and commit the result."
+            exit 1
+          fi
+
+      # One step rather than seven so a run reports every failing harness at once. Engine changes
+      # tend to break more than one, and fixing them one CI round-trip at a time is miserable.
+      - name: Run test harnesses
+        run: |
+          set -uo pipefail
+          BIN="$RUNNER_TEMP/harness"
+          mkdir -p "$BIN"
+          # A plain string, not an array: macOS still ships bash 3.2, where expanding an empty
+          # array under `set -u` is itself an error.
+          failed=""
+
+          run() {
+            name="$1"; shift
+            echo "::group::$name"
+            if "$@"; then
+              echo "$name: PASS"
+            else
+              echo "::error::$name failed"
+              failed="$failed $name"
+            fi
+            echo "::endgroup::"
+          }
+
+          build_run() {
+            name="$1"; shift
+            echo "::group::$name"
+            if swiftc "$@" -o "$BIN/$name" && "$BIN/$name"; then
+              echo "$name: PASS"
+            else
+              echo "::error::$name failed"
+              failed="$failed $name"
+            fi
+            echo "::endgroup::"
+          }
+
+          run fuzz-test swift Tools/fuzz-test.swift
+          build_run calc-test Tinycast/Core/Calculator/*.swift Tools/calc-test.swift
+          build_run ranking-test -swift-version 6 \
+            Tinycast/Core/LauncherRankingStore.swift Tools/ranking-test.swift
+          build_run clipboard-test -swift-version 6 \
+            Tinycast/Core/ClipboardStore.swift Tools/clipboard-test.swift
+          build_run scopes-test -swift-version 6 \
+            Tinycast/Core/SearchScopes.swift Tools/scopes-test.swift
+          build_run emoji-test \
+            Tinycast/Core/Emoji/EmojiCatalog.swift Tinycast/Core/Emoji/EmojiGridGeometry.swift \
+            Tinycast/Core/Emoji/EmojiData.generated.swift Tools/emoji-test.swift
+          build_run custom-command-test -swift-version 6 \
+            Tinycast/Core/CustomCommand.swift Tinycast/Core/ShellCommandRunner.swift \
+            Tools/custom-command-test.swift
+
+          if [ -n "$failed" ]; then
+            echo "Failed harnesses:$failed"
+            exit 1
+          fi
+          echo "All harnesses passed."
+
+      # Code signing is off: the project pins CODE_SIGN_IDENTITY to the "Tinycast Self-Signed"
+      # identity, which only exists on a developer's machine and on the release job's temp keychain.
+      # A PR from a fork cannot reach that secret, and this job only needs to know it compiles.
+      - name: Build (Debug)
+        run: |
+          set -o pipefail
+          xcodebuild -project Tinycast.xcodeproj -scheme Tinycast -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
