@@ -1,10 +1,9 @@
 import Foundation
 
-/// One definition as the palette shows it. `text` is the system's own plain-text blob, deliberately
-/// unparsed for this first cut — see docs/dictionary.md.
+/// One definition as the palette shows it.
 struct DefinitionEntry: Equatable, Sendable {
     let term: String
-    let text: String
+    let definition: Definition
 }
 
 /// Owns the inline definition card's state: debounces the query, runs the blocking lookup off-main,
@@ -41,11 +40,14 @@ final class DictionaryStore: ObservableObject {
         task = Task { [weak self] in
             try? await Task.sleep(for: Self.debounce)
             guard !Task.isCancelled else { return }
-            let text = await Task.detached(priority: .userInitiated) {
-                DictionaryLookup.definition(for: term)
+            // Parsed off-main too: `run` is 20 KB of single-line text to walk.
+            let parsed = await Task.detached(priority: .userInitiated) {
+                DictionaryLookup.definition(for: term).map {
+                    DefinitionEntry(term: term, definition: DefinitionParser.parse($0, term: term))
+                }
             }.value
             guard !Task.isCancelled, let self else { return }
-            self.remember(key, text.map { DefinitionEntry(term: term, text: $0) })
+            self.remember(key, parsed)
         }
     }
 

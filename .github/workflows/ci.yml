@@ -100,7 +100,8 @@ jobs:
           build_run scopes-test -swift-version 6 \
             Tinycast/Core/SearchScopes.swift Tools/scopes-test.swift
           build_run dictionary-test -swift-version 6 \
-            Tinycast/Core/Dictionary/DictionaryQuery.swift Tools/dictionary-test.swift
+            Tinycast/Core/Dictionary/DictionaryQuery.swift \
+            Tinycast/Core/Dictionary/DefinitionParser.swift Tools/dictionary-test.swift
           build_run emoji-test \
             Tinycast/Core/Emoji/EmojiCatalog.swift Tinycast/Core/Emoji/EmojiGridGeometry.swift \
             Tinycast/Core/Emoji/EmojiData.generated.swift Tools/emoji-test.swift

@@ -31,6 +31,7 @@
 		4F3D96E59E117459153336F4 /* SettingsPaneScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C722D73D270A3A6CED4023F7 /* SettingsPaneScanner.swift */; };
 		4F740AF85545CF4133C89B82 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4802942FF89B327A76432A9B /* AboutView.swift */; };
 		5568D02AE095293A15A7F30D /* RightClick.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93E9ACD504E016DFF6FE6C1B /* RightClick.swift */; };
+		57A5B3E96A3BFE1602192BB1 /* DefinitionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E1EC7CDA7B3BB3D2F275ECE /* DefinitionParser.swift */; };
 		57AE40420A6A5349AD092878 /* ShortcutRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 596ADD747B4546B1E3340094 /* ShortcutRecorder.swift */; };
 		6031221C5D8D55C22DF089E9 /* DictionaryQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED84D8F106BD7E5FAA3DBB10 /* DictionaryQuery.swift */; };
 		649961AA51BA4D87626C27D5 /* CalcFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09093BF10EA97BDCA45A241F /* CalcFormatter.swift */; };
@@ -103,6 +104,7 @@
 		0F50886DC766B9923C3875A5 /* RootPaletteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootPaletteView.swift; sourceTree = "<group>"; };
 		1BCCED95A78DC5BED117E960 /* RaycastImportSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaycastImportSelection.swift; sourceTree = "<group>"; };
 		1DB0D6E17E2B2D6F2CB47E0D /* HotKeyCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotKeyCenter.swift; sourceTree = "<group>"; };
+		1E1EC7CDA7B3BB3D2F275ECE /* DefinitionParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefinitionParser.swift; sourceTree = "<group>"; };
 		23591B301A183579098AA019 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		25B8A7D8DBB0CE2ACEDB3979 /* CalcUnits.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalcUnits.swift; sourceTree = "<group>"; };
 		286B7598B81017C746558C7C /* ShellCommandRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellCommandRunner.swift; sourceTree = "<group>"; };
@@ -310,6 +312,7 @@
 		98B0AF244023A61C1599AC73 /* Dictionary */ = {
 			isa = PBXGroup;
 			children = (
+				1E1EC7CDA7B3BB3D2F275ECE /* DefinitionParser.swift */,
 				48384CDB8200E2DFF0E6A441 /* DictionaryLookup.swift */,
 				ED84D8F106BD7E5FAA3DBB10 /* DictionaryQuery.swift */,
 				4A4F09EB5DE1EFED8C35EE38 /* DictionaryStore.swift */,
@@ -520,6 +523,7 @@
 				6CDCE462405648998CDF1E77 /* CurrencyRateStore.swift in Sources */,
 				C526BEAA60A62E9BC78F309E /* CustomCommand.swift in Sources */,
 				664D2BD485F3C5DB3F90B3C6 /* CustomCommandsSettingsView.swift in Sources */,
+				57A5B3E96A3BFE1602192BB1 /* DefinitionParser.swift in Sources */,
 				1D4ADB31F999F6F0DE93A013 /* DictionaryCardView.swift in Sources */,
 				D2B556A3B151C005FB27913B /* DictionaryLookup.swift in Sources */,
 				6031221C5D8D55C22DF089E9 /* DictionaryQuery.swift in Sources */,

@@ -469,10 +469,10 @@ final class AppCore: ObservableObject {
         Paster.copyPlainText(copyText)
     }
 
-    /// Enter on the inline definition card: copy the definition text.
+    /// Enter on the inline definition card: copy every parsed sense, not just the ones that fit.
     func copyDefinition(_ entry: DefinitionEntry) {
         hidePalette(restoreFocus: false)
-        Paster.copyPlainText(entry.text)
+        Paster.copyPlainText(entry.definition.plainText)
     }
 
     /// ⌘↵ on the definition card: hand the word to Dictionary.app for the full entry.

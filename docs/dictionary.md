@@ -16,14 +16,13 @@ below was that a definition is paragraphs and a card would overflow — but the 
 panel past its frame. That materially weakens the objection, and made the cheap option worth trying
 before committing to eleven touch points.
 
-What the card deliberately does not do: parse. It shows `DCSCopyTextDefinition`'s raw text, capped at
-eight lines. That removes the risky half of the feature from the first cut entirely — no fixtures
-needed, nothing to get wrong about an undocumented format — while still showing exactly how the
-feature feels in use.
+The first cut showed the raw blob, which answered the layout question and exposed the real one: the
+card had room to spare, but a wall of undifferentiated text is unreadable. So the card now renders
+the parsed entry — headword and pronunciation, then each part of speech with its numbered senses,
+capped at three sections of three senses. `↵` copies *every* parsed sense, not just the ones shown.
 
-Judge it on: whether eight lines is enough to be useful, whether the raw blob is readable without
-structure, and whether losing the app results behind a card is the right trade. If the answer is
-"nearly, but it needs room", the mode below is the next step and the parser becomes worth writing.
+The space question is settled and the mode below is **not** currently planned. Revisit it only if
+three senses per part of speech proves too tight in practice.
 
 Look a word up in the dictionaries macOS already has, from the palette, without leaving it.
 
@@ -61,18 +60,29 @@ DCSCopyTextDefinition(nil, word as CFString, CFRange(location: 0, length: word.u
 - It is synchronous and hits disk, so it must not run on the main actor.
 - No entitlement, and Tinycast is not sandboxed (`app-sandbox` is `false`).
 
-**The returned format is undocumented and unstable.** It is roughly
+**The returned format is undocumented.** Captured from macOS 26, the grammar is:
 
 ```
-apple | ˈapəl | noun 1 the round fruit of a tree of the rose family… • the tree bearing such
-fruit… 2 (in phrases) …  | ORIGIN Old English æppel …
+<headword> [<syl·la·bi·fied>] | <pronunciation> | [<variants>] [<part of speech>] <senses> [<trailers>]
 ```
 
-— pipes around the pronunciation, `•` for sub-senses, digits opening numbered senses, and a trailing
-`ORIGIN` / `PHRASES` block. That shape varies by dictionary and by locale. So the parser is
-explicitly **best-effort with a raw fallback**: anything it cannot structure is displayed verbatim
-rather than dropped. A definition the user can read beats a tidy model that occasionally shows
-nothing.
+*The whole entry is a single line — there are no newlines anywhere.* Sections have to be recovered
+from vocabulary, not whitespace. Everything past the headword is optional: `New York` has no part of
+speech and goes straight to numbered senses, `run` has no syllabified form, `quickly` has neither
+numbers nor trailers. Senses are numbered `1 2 3 …` in sequence, sub-senses open with `•`, examples
+follow a colon, and the entry ends in some subset of `PHRASES`, `PHRASAL VERBS`, `DERIVATIVES`,
+`USAGE` and `ORIGIN`.
+
+Two facts drive the parser:
+
+- **Trailers are most of the payload.** They start 43% into `run` and 26% into `apple`, so dropping
+  them removes 57% and 74% of those entries — and none of it is the definition.
+- **Sequential numbering is what makes sense-splitting safe.** Requiring the *next expected* integer
+  is why `1664`, `$1,300` and `population 19,490,297` aren't mistaken for sense markers.
+
+The parser is still **best-effort with a raw fallback**: anything it can't structure comes back as a
+single unlabelled section holding the text verbatim, so `sections` is never empty and the view has no
+failure case. A definition the user can read beats a tidy model that occasionally shows nothing.
 
 `DCSGetTermRangeInString` (also public) resolves the actual term boundary, which handles multi-word
 terms and inflections (`running` → `run`). Use it to normalise the query before lookup.
