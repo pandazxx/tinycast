@@ -108,6 +108,31 @@ The custom-command harness spawns **real `/bin/zsh`** processes. Its shell-envir
 the developer's own dotfiles. `/etc/zshrc` is still sourced for interactive shells, so the assertions
 are relative — the fixture's alias resolves with `-i` and not without — rather than absolute.
 
+## Performance logging
+
+The dictionary mode logs a timing line per completed search at **debug** level, so it costs nothing
+unless you collect it. A keystroke there is one spell-check completion plus one dictionary read per
+candidate, which is the part most likely to drag.
+
+```sh
+log stream --predicate 'subsystem == "com.tinycast.app.dev" AND category == "dictionary"' --level debug
+```
+
+(Use `com.tinycast.app` for a stable build — the subsystem is the bundle id, so the dev channel is
+its own stream.) Each completed search prints:
+
+```
+define <word>: 12 candidates, 9 defined in 47.2ms (complete 1.8ms, lookup+parse 45.4ms, 3.8ms/word)
+```
+
+`ms/word` is the number to act on: total lookup cost is that figure times `maxCandidates` in
+`DictionaryStore`, so it says directly whether the cap of 12 is too high. `complete` is the
+`NSSpellChecker` call, which runs on the main actor; `lookup+parse` is the detached batch. Cache hits
+log as such and do no work.
+
+The query itself is logged `.private`, so it is redacted unless you are attached in Xcode — the
+timings are `.public`.
+
 ## Generated data
 
 Two Swift files are emitted by scripts and must never be hand-edited. Both download their source, so

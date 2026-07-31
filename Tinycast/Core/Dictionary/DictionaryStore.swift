@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// One matching word, already looked up and parsed — the row *and* the detail view read from this,
 /// so opening an entry costs nothing.
@@ -24,6 +25,11 @@ final class DictionaryStore: ObservableObject {
     private static let maxCandidates = 12
     private static let cacheLimit = 32
 
+    /// Debug level, so the instrumentation is dropped unless someone is collecting it — NSLog would
+    /// cost more than the work it measures at one message per keystroke. See docs/development.md.
+    private nonisolated static let log = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.tinycast.app", category: "dictionary")
+
     private var task: Task<Void, Never>?
     private var cache: [String: [DefinitionEntry]] = [:]
     private var insertions: [String] = []
@@ -43,6 +49,9 @@ final class DictionaryStore: ObservableObject {
             task = nil
             isSearching = false
             entries = cached
+            Self.log.debug(
+                "define \(partial, privacy: .private): cache hit, \(cached.count, privacy: .public) results"
+            )
             return
         }
         isSearching = true
@@ -50,7 +59,10 @@ final class DictionaryStore: ObservableObject {
             try? await Task.sleep(for: Self.debounce)
             guard !Task.isCancelled, let self else { return }
             // Spell-check completions are AppKit and main-actor bound; the lookups they feed are not.
+            // Timed from after the debounce: the wait is deliberate, the work is what can drag.
+            let started = ContinuousClock.now
             let candidates = Self.candidates(partial: partial)
+            let completed = ContinuousClock.now
             let found = await Task.detached(priority: .userInitiated) {
                 candidates.compactMap { word -> DefinitionEntry? in
                     guard let raw = DictionaryLookup.definition(for: word) else { return nil }
@@ -59,6 +71,9 @@ final class DictionaryStore: ObservableObject {
                 }
             }.value
             guard !Task.isCancelled else { return }
+            Self.logTiming(
+                partial: partial, candidates: candidates.count, found: found.count,
+                complete: completed - started, lookup: ContinuousClock.now - completed)
             self.remember(key, found)
         }
     }
@@ -75,6 +90,27 @@ final class DictionaryStore: ObservableObject {
             if ordered.count == maxCandidates { break }
         }
         return ordered
+    }
+
+    /// The per-word figure is the one that matters: it is `maxCandidates` multiplied by that number
+    /// which decides how the mode feels, so it says directly whether the cap needs lowering.
+    private nonisolated static func logTiming(
+        partial: String, candidates: Int, found: Int, complete: Duration, lookup: Duration
+    ) {
+        let completeMs = milliseconds(complete)
+        let lookupMs = milliseconds(lookup)
+        let perWord = candidates == 0 ? 0 : lookupMs / Double(candidates)
+        // Formatted up front rather than interpolated into the log message, so the numbers stay
+        // readable as one public string while the query itself remains redactable.
+        let summary = String(
+            format: "%d candidates, %d defined in %.1fms (complete %.1fms, lookup+parse %.1fms, %.1fms/word)",
+            candidates, found, completeMs + lookupMs, completeMs, lookupMs, perWord)
+        log.debug("define \(partial, privacy: .private): \(summary, privacy: .public)")
+    }
+
+    private nonisolated static func milliseconds(_ duration: Duration) -> Double {
+        let (seconds, attoseconds) = duration.components
+        return Double(seconds) * 1_000 + Double(attoseconds) / 1_000_000_000_000_000
     }
 
     private func remember(_ key: String, _ found: [DefinitionEntry]) {
