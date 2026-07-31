@@ -282,17 +282,11 @@ struct RootPaletteView: View {
             vm.selection = 0
             scrollToken = UUID()
             emojiScroll = EmojiScrollIntent(kind: .top)
-            // `define <word>` in the launcher hands off to the dictionary mode carrying just the
-            // word, so the field reads as that mode's own search instead of keeping a dead prefix.
-            // Re-entrant by design: the assignment below fires this handler again, and the second
-            // pass falls through to the search because the mode is no longer `.launcher`.
-            if vm.mode == .launcher, let term = DictionaryQuery.term(in: vm.query) {
-                vm.mode = .dictionary
-                vm.query = term
-                return
-            }
             dictionaryDetail = nil
-            if vm.mode == .dictionary { dictionary.search(vm.query) }
+            // Deferred to the next tick: `onChange` can run inside the view update, and both the
+            // hand-off (which rewrites `vm.query`, re-entering this handler) and the store's reset
+            // publish — which SwiftUI faults on as "publishing changes from within view updates".
+            Task { @MainActor in reactToDictionaryQuery() }
         }
         .onChange(of: vm.mode) {
             vm.selection = 0
@@ -300,7 +294,7 @@ struct RootPaletteView: View {
             scrollToken = UUID()
             emojiScroll = EmojiScrollIntent(kind: .top)
             dictionaryDetail = nil
-            dictionary.search(vm.mode == .dictionary ? vm.query : nil)
+            Task { @MainActor in dictionary.search(vm.mode == .dictionary ? vm.query : nil) }
         }
         // Pop-to-root: `prepare` clears query/selection, but if both were already at their defaults the handlers above never fire — this token guarantees the scroll itself snaps back to the top.
         .onChange(of: vm.resetToken) {
@@ -840,6 +834,19 @@ struct RootPaletteView: View {
     }
 
     /// Back out to a fresh root search — `prepare` is the same reset used when the palette is shown (clears query/selection, bumps focusToken to refocus the field).
+    /// `define <word>` in the launcher hands off to the dictionary mode carrying just the word, so
+    /// the field reads as that mode's own search instead of keeping a dead prefix. Re-entrant by
+    /// design: rewriting the query fires the change handler again, and the second pass falls through
+    /// to the search because the mode is no longer `.launcher`.
+    private func reactToDictionaryQuery() {
+        if vm.mode == .launcher, let term = DictionaryQuery.term(in: vm.query) {
+            vm.mode = .dictionary
+            vm.query = term
+            return
+        }
+        if vm.mode == .dictionary { dictionary.search(vm.query) }
+    }
+
     private func exitToLauncher() {
         // The detail is a screen inside the mode: back returns to the results before the launcher.
         if dictionaryDetail != nil {
