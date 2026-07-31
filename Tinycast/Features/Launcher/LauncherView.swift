@@ -12,45 +12,33 @@ struct LauncherList: View {
     var calcSelected = false
     var onActivateCalc: () -> Void = {}
     var onCalcActions: () -> Void = {}
-    /// Inline definition for a `define <word>` query. Mutually exclusive with `calc`, so the two
-    /// never both claim flat selection index 0.
-    var definition: DefinitionEntry?
-    var definitionSelected = false
-    var onActivateDefinition: () -> Void = {}
     let onActivate: (AppEntry) -> Void
     let onActions: (AppEntry) -> Void
     @EnvironmentObject private var runningApps: RunningAppsMonitor
 
     private nonisolated static let calcRowID = "calc-card"
-    private nonisolated static let definitionRowID = "definition-card"
 
     private enum Row: Identifiable {
         case header(String)
         case calc(CalcResult)
-        case definition(DefinitionEntry)
         case app(AppEntry)
         var id: String {
             switch self {
             case .header(let title): return "header-" + title
             case .calc: return LauncherList.calcRowID
-            case .definition: return LauncherList.definitionRowID
             case .app(let app): return app.id
             }
         }
     }
 
     private var rows: [Row] {
-        var cardRows: [Row] = []
-        if let calc {
-            cardRows = [.header("Calculator"), .calc(calc)]
-        } else if let definition {
-            cardRows = [.header("Dictionary"), .definition(definition)]
-        }
+        var calcRows: [Row] = []
+        if let calc { calcRows = [.header("Calculator"), .calc(calc)] }
         guard showSections else {
-            guard !results.isEmpty else { return cardRows }
-            return cardRows + [.header("Results")] + results.map(Row.app)
+            guard !results.isEmpty else { return calcRows }
+            return calcRows + [.header("Results")] + results.map(Row.app)
         }
-        var rows: [Row] = cardRows
+        var rows: [Row] = calcRows
         let favorites = results.prefix(favoriteCount)
         let rest = results.dropFirst(favoriteCount)
         // `rest` is apps-then-panes-then-commands by the AppIndex sort invariant, so filtering by kind keeps row order identical and the flat selection index valid.
@@ -71,7 +59,7 @@ struct LauncherList: View {
     var body: some View {
         let rows = rows
         return Group {
-            if results.isEmpty && calc == nil && definition == nil {
+            if results.isEmpty && calc == nil {
                 EmptyResults(text: "No apps found")
             } else {
                 ScrollViewReader { proxy in
@@ -86,11 +74,6 @@ struct LauncherList: View {
                                         .contentShape(Rectangle())
                                         .onTapGesture(perform: onActivateCalc)
                                         .onRightClick(perform: onCalcActions)
-                                        .padding(.bottom, Theme.Spacing.xs)
-                                case .definition(let entry):
-                                    DictionaryCard(entry: entry, selected: definitionSelected)
-                                        .contentShape(Rectangle())
-                                        .onTapGesture(perform: onActivateDefinition)
                                         .padding(.bottom, Theme.Spacing.xs)
                                 case .app(let app):
                                     AppRow(
@@ -114,8 +97,6 @@ struct LauncherList: View {
                     .onChange(of: scrollToken) {
                         if calcSelected {
                             proxy.scrollTo(Self.calcRowID, anchor: .center)
-                        } else if definitionSelected {
-                            proxy.scrollTo(Self.definitionRowID, anchor: .center)
                         } else if let selectedID {
                             proxy.scrollTo(selectedID, anchor: .center)
                         }

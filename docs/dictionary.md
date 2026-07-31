@@ -1,37 +1,17 @@
 # Dictionary lookup
 
-> **Status: an inline card is implemented; the mode below is not.** We are trying the cheap option
-> first to judge the feel before paying for the expensive one — see "What shipped first" and
-> "Alternatives considered". The "Risks" and "Rollout" sections should be trimmed once this settles
-> and becomes a plain subsystem doc like [calculator.md](calculator.md).
+> **Status: implemented.** The "Alternatives considered" and "Risks" sections are kept because the
+> shape changed twice while building; trim them once it settles.
 
-## What shipped first
-
-An inline card in the launcher, mirroring the calculator's: type `define <word>` and the definition
-appears at flat selection index 0. `↵` copies it, `⌘↵` opens Dictionary.app.
-
-It exists to answer a question the design could not: **is a card enough?** The argument for the mode
-below was that a definition is paragraphs and a card would overflow — but the calculator card renders
-*inside* the launcher's `ScrollView`, so a tall card scrolls with the list rather than pushing the
-panel past its frame. That materially weakens the objection, and made the cheap option worth trying
-before committing to eleven touch points.
-
-The first cut showed the raw blob, which answered the layout question and exposed the real one: the
-card had room to spare, but a wall of undifferentiated text is unreadable. So the card now renders
-the parsed entry — headword and pronunciation, then each part of speech with its numbered senses,
-capped at three sections of three senses. `↵` copies *every* parsed sense, not just the ones shown.
-
-The space question is settled and the mode below is **not** currently planned. Revisit it only if
-three senses per part of speech proves too tight in practice.
-
-Look a word up in the dictionaries macOS already has, from the palette, without leaving it.
+Look words up in the dictionaries macOS already has, from the palette, without leaving it.
 
 ## User journey
 
 1. Summon the palette.
 2. Type `define ` — the palette switches to Dictionary mode and the prefix disappears from the field.
-3. Keep typing the word. Definitions resolve live, a keystroke behind.
-4. `↵` copies the selected sense; `⌘↵` opens the word in Dictionary.app.
+3. Keep typing. Matching words resolve live, a keystroke behind — `define he` offers `he`, `her`,
+   `hello`, each with its first sense.
+4. `↵` opens the full entry; `⌘↵` hands the word to Dictionary.app.
 
 `define` is also a command entry, so typing `dict` or `define` with nothing after it finds
 **Define Word** in the launcher and enters the mode that way — discoverable without knowing the
@@ -100,8 +80,9 @@ undocumented; they are not worth the breakage risk, and are deliberately not use
     plain `String?`. Kept separate *only* so the parser stays harness-compilable — the same reason
     the custom-command confirmation gate lives in `AppCore` rather than in `ShellCommandRunner`.
   - `DictionaryStore.swift` — `@MainActor ObservableObject`, owned by `AppCore`. Debounce,
-    cancellation, memo, published result.
-- `Features/Dictionary/DictionaryView.swift` — the split-pane view.
+    cancellation, LRU cache, published `[DefinitionEntry]`.
+  - `DictionaryCompletions.swift` — the `NSSpellChecker` candidate list. AppKit, `@MainActor`.
+- `Features/Dictionary/DictionaryView.swift` — the result list, its row, and the detail view.
 - `Tools/dictionary-test.swift` — the harness.
 
 ## Model
@@ -111,7 +92,6 @@ struct Definition: Equatable, Sendable {
     let headword: String
     let pronunciation: String?      // the `| ˈapəl |` span, when present
     let sections: [Section]         // one per part of speech; never empty
-    let origin: String?
 
     struct Section: Equatable, Sendable {
         let partOfSpeech: String?   // nil for the unparsed fallback
@@ -125,64 +105,60 @@ so the view and the selection model have no special case to carry.
 
 ## Selection
 
-Dictionary mode reuses the **clipboard split-pane shape**: list on the left at
-`Theme.Size.clipboardListWidth`, detail on the right. One row per `Section` — usually one to three
-(noun / verb / adjective) — with that section's senses rendered in the scrollable right pane.
+`PaletteMode.dictionary` is a sub-screen like Clipboard or Emoji, so the header shows a back chevron.
+One row per matching word; `resultCount == dictResults.count`, no card at index 0 and no offset
+arithmetic, which keeps the *"flat `selection` index must match the visible row order"* invariant true
+by construction.
 
-This keeps the *"flat `selection` index must match the visible row order exactly"* invariant true by
-construction: `resultCount == definition?.sections.count ?? 0`, with no inline card at index 0 and no
-offset arithmetic. Long definitions get a scrolling pane instead of a card that would overflow the
-panel.
+`↵` opens `DictionaryDetail` for the selected row. That detail is a screen *inside* the mode rather
+than a mode of its own — `resultCount` drops to 0 while it is up (nothing there is selectable), and
+Escape and the back chevron pop it before leaving the mode. A second `PaletteMode` would have meant
+another seven `switch` arms for a screen with no selection model.
+
+Row density follows `AppSettings.dictionaryDetailedRows`: one line (word + first sense) or two (word
+and pronunciation above, definition below).
 
 ## Async pipeline
 
-Mirrors the shapes already in the codebase rather than inventing a new one:
+`DCSCopyTextDefinition` does exact lookup only — there is no public "words starting with `ru`" API —
+so a query is two steps:
 
-- Keystroke → `DictionaryStore.query(_:)` on the main actor.
-- **Debounce ~120 ms**, cancelling any in-flight lookup, so a fast typist triggers one disk read
-  rather than eight.
-- The lookup itself runs `nonisolated` via `Task.detached(priority: .userInitiated)` and returns a
-  `Sendable` value, per the concurrency boundary in [architecture.md](architecture.md).
-- **One-deep memo** keyed on the normalised word, exactly like `CalcMemo`, so re-renders from hover
-  or selection don't re-read the disk.
-- **The previous result stays on screen while the next resolves.** Clearing to empty on every
-  keystroke makes the pane strobe; the calculator card has the same property.
+1. **Complete**, on the main actor. `NSSpellChecker.completions(forPartialWordRange:…)` is AppKit and
+   main-thread affine, but it returns ~20 strings and costs little. The typed word is pulled to the
+   front, because the checker doesn't always rank it first (`ru` offers `running` before `run`).
+2. **Look up and parse**, off it. Each candidate is a disk read, so the list is capped at 12 and the
+   whole batch runs in one `Task.detached(priority: .userInitiated)`. Candidates the dictionary
+   doesn't define — `he's`, `serendipity's` — drop out here, which is also the spelling filter.
 
-Cache is bounded — a small LRU (~32 entries) rather than an unbounded dictionary, to respect the
-under-100 MB rule.
+Around that: a **120 ms debounce** with cancellation so a fast typist triggers one batch rather than
+eight, and a **bounded 32-entry LRU** so backspacing through a word doesn't re-read the disk.
+
+Each row carries its own parsed `Definition`, so opening the detail view costs nothing.
+
+*The spell checker was chosen over `/usr/share/dict/words` on evidence:* for `ru` it returns
+`running, run, rubbish, rush, runs, rub, rumors`, while the word list returns `ruach, ruana, rubasse`.
+Inflection-aware and frequency-ordered beats alphabetical.
 
 ## Actions
 
 | Key | Action |
 | --- | --- |
-| `↵` | Copy the selected section's senses |
+| `↵` | Open the detail view; in the detail view, copy the definition |
 | `⌘↵` | Open the word in Dictionary.app (`dict://` via `NSWorkspace`) |
 | `⌘K` | Actions menu: Copy Definition, Copy Word, Open in Dictionary |
+| `esc` | Pop the detail view; from the list, close the palette |
 
 `⌘⌫` has no meaning here and stays `.ignored`.
 
 ## Plumbing checklist
 
-Adding `PaletteMode.dictionary` touches the seven `switch vm.mode` sites in `RootPaletteView.swift`
-plus the mode's own declaration:
+`PaletteMode.dictionary` touches the seven `switch vm.mode` sites in `RootPaletteView.swift`
+(`resultCount`, `actionsContent`, `⌘↵`, `⌘⌫`, `content`, `actionPillLabel`, `activateSelection`) plus
+the mode's own declaration in `AppCore.swift`, the `CommandID.defineWord` entry in
+`CommandRegistry.swift`, and the `define ` hand-off in `onChange(of: vm.query)`.
 
-| Where | What |
-| --- | --- |
-| `Core/AppCore.swift` (`PaletteMode`) | case + `title` / `systemImage` / `placeholder` |
-| `Core/AppCore.swift` | `dictionary` store wired in `start()`; `runCommand` case |
-| `Core/CommandRegistry.swift` | `CommandID.defineWord` + name + SF Symbol |
-| `RootPaletteView.swift:66` | `resultCount` |
-| `RootPaletteView.swift:108` | `actionsContent` |
-| `RootPaletteView.swift:358` | `⌘↵` / `⌥↵` secondary action |
-| `RootPaletteView.swift:414` | `⌘⌫` — returns `.ignored` |
-| `RootPaletteView.swift:503` | `content(…)` — the split pane |
-| `RootPaletteView.swift:660` | `actionPillLabel` |
-| `RootPaletteView.swift:764` | `activateSelection` |
-| `RootPaletteView.swift` (`onChange`) | the `define ` prefix hand-off |
-
-There is currently **no prefix mechanism anywhere in the palette** — modes are entered by Tab, a
-hotkey, or a command entry. `define ` is therefore a new input concept, and it should stay a single
-special case in one place rather than a general prefix registry until a second prefix actually exists.
+That hand-off is deliberately re-entrant: it rewrites `vm.query`, which fires the same handler again,
+and the second pass falls through to the search because the mode is no longer `.launcher`.
 
 ## Testing
 
@@ -199,11 +175,11 @@ crash or produce an empty `sections`.
 
 ## Alternatives considered
 
-**An inline card in launcher mode**, like the calculator's. Far less plumbing — no new mode.
-Originally rejected on the grounds that a definition is paragraphs and the card would push the panel
-past the fixed frame `PaletteWindowController` owns. **That reasoning was wrong**: the calculator card
-renders inside the launcher's `ScrollView`, so a tall card scrolls with the list. The card is what
-shipped first; see "What shipped first" above.
+**An inline card in launcher mode**, like the calculator's. This shipped first and was replaced. The
+original objection — that a card would overflow the panel — was wrong, since the calculator card
+renders inside the launcher's `ScrollView`. What actually killed it is that a card shows *one* word:
+there is no room for the candidate list, and typing `define he` should offer `he`, `her`, `hello`
+rather than commit to a guess.
 
 **Private DictionaryServices APIs** for structured results. Rejected — undocumented, and a silent
 break on a macOS update would be invisible until a user reported it.
@@ -238,13 +214,6 @@ the palette, which is the thing the palette exists to avoid.
 
 ## Rollout
 
-Three PRs, each independently reviewable and green:
-
-1. `DefinitionParser` + `Tools/dictionary-test.swift` + fixtures. No UI, no CoreServices. Fully
-   testable in the container.
-2. `DictionaryLookup` + `DictionaryStore` + `AppCore` wiring. Still no UI; the store can be exercised
-   by a temporary command.
-3. `PaletteMode.dictionary`, the view, the command entry and the `define ` prefix.
-
-Add the link to the subsystem list in [`AGENTS.md`](../AGENTS.md) with step 3, when there is a
-subsystem to point at.
+Shipped. The `NSSpellChecker` completion source, the 12-candidate cap and the 120 ms debounce are the
+knobs most likely to need tuning once it has been used in anger — each candidate costs a dictionary
+read, so the cap is the one that governs how the mode feels.

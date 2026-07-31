@@ -5,6 +5,7 @@ enum PaletteMode: String, CaseIterable, Identifiable {
     case launcher
     case clipboard
     case calculatorHistory
+    case dictionary
     case emoji
 
     var id: String { rawValue }
@@ -13,6 +14,7 @@ enum PaletteMode: String, CaseIterable, Identifiable {
         case .launcher: return "Apps"
         case .clipboard: return "Clipboard"
         case .calculatorHistory: return "Calculator History"
+        case .dictionary: return "Define Word"
         case .emoji: return "Emoji & Symbols"
         }
     }
@@ -21,6 +23,7 @@ enum PaletteMode: String, CaseIterable, Identifiable {
         case .launcher: return "magnifyingglass"
         case .clipboard: return "doc.on.doc"
         case .calculatorHistory: return "plus.forwardslash.minus"
+        case .dictionary: return "book"
         case .emoji: return "face.smiling"
         }
     }
@@ -29,6 +32,7 @@ enum PaletteMode: String, CaseIterable, Identifiable {
         case .launcher: return "Search for apps and commands…"
         case .clipboard: return "Type to filter entries…"
         case .calculatorHistory: return "Do math, convert units, or search your past calculations…"
+        case .dictionary: return "Type a word to define…"
         case .emoji: return "Search emoji and symbols…"
         }
     }
@@ -433,6 +437,8 @@ final class AppCore: ObservableObject {
             showPalette(mode: .calculatorHistory)
         case .clipboardHistory:
             showPalette(mode: .clipboard)
+        case .defineWord:
+            showPalette(mode: .dictionary)
         case .searchEmoji:
             showPalette(mode: .emoji)
         case .exportSettings:
@@ -469,13 +475,19 @@ final class AppCore: ObservableObject {
         Paster.copyPlainText(copyText)
     }
 
-    /// Enter on the inline definition card: copy every parsed sense, not just the ones that fit.
+    /// Copy every parsed sense of an entry, not just the ones the row had room for.
     func copyDefinition(_ entry: DefinitionEntry) {
         hidePalette(restoreFocus: false)
         Paster.copyPlainText(entry.definition.plainText)
     }
 
-    /// ⌘↵ on the definition card: hand the word to Dictionary.app for the full entry.
+    /// Copy just the headword — useful when the definition was only there to check a spelling.
+    func copyWord(_ entry: DefinitionEntry) {
+        hidePalette(restoreFocus: false)
+        Paster.copyPlainText(entry.definition.headword)
+    }
+
+    /// Hand the word to Dictionary.app for the parts this palette deliberately drops.
     func openInDictionary(_ entry: DefinitionEntry) {
         hidePalette(restoreFocus: false)
         guard

@@ -11,7 +11,7 @@ struct RootPaletteView: View {
     /// Observed so the inline card re-evaluates the moment a fresh FX snapshot lands, or the user
     /// turns currency conversion on or off.
     @EnvironmentObject private var currencyRates: CurrencyRateStore
-    /// Observed so the definition card appears the moment an async lookup lands.
+    /// Observed so the result list fills in the moment an async lookup lands.
     @EnvironmentObject private var dictionary: DictionaryStore
     @EnvironmentObject private var emojiIndex: EmojiIndex
     @EnvironmentObject private var frequentEmoji: FrequentEmojiStore
@@ -28,6 +28,9 @@ struct RootPaletteView: View {
     @State private var scrollToken = UUID()
     /// The emoji grid's scroll request — the lazy grid needs distinct reset/follow scroll ops, unlike the 1-D lists that recenter fine on `scrollToken`.
     @State private var emojiScroll = EmojiScrollIntent(kind: .top)
+    /// The entry opened with ↵ from the dictionary results; nil while the list is showing. A screen
+    /// inside the mode rather than a mode of its own, so the back chevron pops it before the mode.
+    @State private var dictionaryDetail: DefinitionEntry?
 
     private var isQueryEmpty: Bool { vm.query.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -56,32 +59,22 @@ struct RootPaletteView: View {
     }
     /// Flat grid order across sections — what `vm.selection` indexes in emoji mode.
     private var emojiResults: [EmojiEntry] { emojiSections.flatMap(\.entries) }
+    /// Dictionary matches for the current query — `DictionaryStore` owns the debounce and lookups.
+    private var dictResults: [DefinitionEntry] { vm.mode == .dictionary ? dictionary.entries : [] }
 
-    /// The `define <word>` term for the current query, or nil when this isn't a dictionary lookup.
-    private var dictionaryTerm: String? {
-        vm.mode == .launcher ? DictionaryQuery.term(in: vm.query) : nil
-    }
-    /// Inline definition for the current query. Gated on the prefix still matching, because the
-    /// store's last result outlives the query that produced it by a keystroke.
-    private var definition: DefinitionEntry? {
-        dictionaryTerm == nil ? nil : dictionary.entry
-    }
-
-    /// Inline calculator answer for the current query, live in both the launcher and Calculator History search; when present it occupies flat selection index 0 so rows shift by `cardCount`.
-    /// A `define` query suppresses it outright, so the two cards can never both claim index 0.
+    /// Inline calculator answer for the current query, live in both the launcher and Calculator History search; when present it occupies flat selection index 0 so rows shift by `calcCount`.
     private var calcResult: CalcResult? {
-        guard dictionaryTerm == nil else { return nil }
-        return vm.mode == .launcher || vm.mode == .calculatorHistory
+        vm.mode == .launcher || vm.mode == .calculatorHistory
             ? CalcMemo.evaluate(vm.query, currency: currencyRates.source) : nil
     }
-    /// The inline card's row count — 0 or 1, never 2, since calculator and dictionary are exclusive.
-    private var cardCount: Int { calcResult == nil && definition == nil ? 0 : 1 }
+    private var calcCount: Int { calcResult == nil ? 0 : 1 }
 
     private var resultCount: Int {
         switch vm.mode {
-        case .launcher: return appResults.count + cardCount
+        case .launcher: return appResults.count + calcCount
         case .clipboard: return clipResults.count
-        case .calculatorHistory: return histResults.count + cardCount
+        case .calculatorHistory: return histResults.count + calcCount
+        case .dictionary: return dictionaryDetail == nil ? dictResults.count : 0
         case .emoji: return emojiResults.count
         }
     }
@@ -98,21 +91,24 @@ struct RootPaletteView: View {
 
     /// The inline calc card sits at flat index 0 when present; only value payloads have a Copy action.
     private var calcActionableResult: CalcResult? {
-        guard cardCount > 0, selection == 0, let calc = calcResult, calc.isActionable else {
+        guard calcCount > 0, selection == 0, let calc = calcResult, calc.isActionable else {
             return nil
         }
         return calc
     }
     private var selectedAppEntry: AppEntry? {
-        let index = selection - cardCount
+        let index = selection - calcCount
         return appResults.indices.contains(index) ? appResults[index] : nil
     }
     private var selectedClipItem: ClipboardItem? {
         clipResults.indices.contains(selection) ? clipResults[selection] : nil
     }
     private var selectedHistEntry: CalcHistoryEntry? {
-        let index = selection - cardCount
+        let index = selection - calcCount
         return histResults.indices.contains(index) ? histResults[index] : nil
+    }
+    private var selectedDefinition: DefinitionEntry? {
+        dictResults.indices.contains(selection) ? dictResults[selection] : nil
     }
     private var selectedEmojiEntry: EmojiEntry? {
         emojiResults.indices.contains(selection) ? emojiResults[selection] : nil
@@ -133,11 +129,24 @@ struct RootPaletteView: View {
                         core.resetRanking(for: app)
                         // Reset can move the item; keep the highlight on the item whose action ran.
                         if let index = appResults.firstIndex(of: app) {
-                            vm.selection = index + cardCount
+                            vm.selection = index + calcCount
                         }
                     })
             }
             return nil
+        case .dictionary:
+            guard let entry = dictionaryDetail ?? selectedDefinition else { return nil }
+            return PopoverMenuContent(items: [
+                PopoverMenuItem(
+                    title: "Copy Definition", icon: .symbol("doc.on.doc"),
+                    action: { core.copyDefinition(entry) }),
+                PopoverMenuItem(
+                    title: "Copy Word", icon: .symbol("textformat"),
+                    action: { core.copyWord(entry) }),
+                PopoverMenuItem(
+                    title: "Open in Dictionary", icon: .symbol("book"), shortcut: "⌘↵",
+                    action: { core.openInDictionary(entry) }),
+            ])
         case .clipboard:
             if let clip = selectedClipItem {
                 return ClipboardActionsMenu.content(
@@ -190,15 +199,13 @@ struct RootPaletteView: View {
         let emojis = emojiSections.flatMap(\.entries)
         // Newest stored clip + the reorder token: the pair changes only when the store mutates, never when a query filters the list.
         let clipFollow = ClipFollowKey(id: store.items.first?.id, token: vm.followToken)
-        // Every count/selection below derives from this one card/offset pair — the flat selection index must always match the visible row order, inline card included.
+        // Every count/selection below derives from this one calc/offset pair — the flat selection index must always match the visible row order, calc card included.
         let calc = calcResult
-        let definition = definition
-        let offset = calc == nil && definition == nil ? 0 : 1
+        let offset = calc == nil ? 0 : 1
         // Only the active mode is non-empty.
         let count = apps.count + offset + clips.count + hist.count + emojis.count
         let sel = count == 0 ? 0 : min(max(vm.selection, 0), count - 1)
         let calcSelected = calc != nil && sel == 0
-        let definitionSelected = definition != nil && sel == 0
         // An error card is selectable but has no action: it must not drive the Copy Answer pill, ⌘K menu, or Enter.
         let calcActionable = calcSelected && calc?.isActionable == true
         let showSections = vm.mode == .launcher && isQueryEmpty
@@ -206,9 +213,7 @@ struct RootPaletteView: View {
             showSections ? apps.prefix(while: { favorites.isFavorite($0) }).count : 0
         let selectedApp = apps.indices.contains(sel - offset) ? apps[sel - offset] : nil
         // Derive the footer label from the already-resolved selection so `bottomBar` doesn't re-run `appResults` (its filter/sort aren't memoized). The primary/Actions group is hidden when there's nothing to act on: no results in any mode, or an error calc card (selectable but action-less).
-        let pillLabel = actionPillLabel(
-            selectedApp: selectedApp, calcActionable: calcActionable,
-            definitionSelected: definitionSelected)
+        let pillLabel = actionPillLabel(selectedApp: selectedApp, calcActionable: calcActionable)
         let showActionGroup = count > 0 && !(calcSelected && !calcActionable)
 
         // The `header` (and its single search field) is always attached in the same position via safeAreaInset so its focus survives the compact↔expanded swap — only the results below it toggle. Collapsed shows the bar alone; expanded floats header + action bar over the list with edge-dissolve (see docs/ui.md).
@@ -218,8 +223,7 @@ struct RootPaletteView: View {
             } else {
                 content(
                     apps: apps, clips: clips, hist: hist, emojiSections: emojiSections, calc: calc,
-                    definition: definition, selection: sel, favoriteCount: favoriteCount,
-                    showSections: showSections
+                    selection: sel, favoriteCount: favoriteCount, showSections: showSections
                 )
             }
         }
@@ -273,15 +277,25 @@ struct RootPaletteView: View {
             vm.selection = 0
             scrollToken = UUID()
             emojiScroll = EmojiScrollIntent(kind: .top)
-            // The store debounces and cancels, so this is safe to call on every keystroke.
-            dictionary.lookup(dictionaryTerm)
+            // `define <word>` in the launcher hands off to the dictionary mode carrying just the
+            // word, so the field reads as that mode's own search instead of keeping a dead prefix.
+            // Re-entrant by design: the assignment below fires this handler again, and the second
+            // pass falls through to the search because the mode is no longer `.launcher`.
+            if vm.mode == .launcher, let term = DictionaryQuery.term(in: vm.query) {
+                vm.mode = .dictionary
+                vm.query = term
+                return
+            }
+            dictionaryDetail = nil
+            if vm.mode == .dictionary { dictionary.search(vm.query) }
         }
         .onChange(of: vm.mode) {
             vm.selection = 0
             showActions = false
             scrollToken = UUID()
             emojiScroll = EmojiScrollIntent(kind: .top)
-            dictionary.lookup(dictionaryTerm)
+            dictionaryDetail = nil
+            dictionary.search(vm.mode == .dictionary ? vm.query : nil)
         }
         // Pop-to-root: `prepare` clears query/selection, but if both were already at their defaults the handlers above never fire — this token guarantees the scroll itself snaps back to the top.
         .onChange(of: vm.resetToken) {
@@ -391,15 +405,14 @@ struct RootPaletteView: View {
                 core.copyToClipboard(clipResults[selection])
             case .calculatorHistory:
                 // The inline calc card (index 0 when present) has no secondary action; only stored entries respond.
-                let index = selection - cardCount
+                let index = selection - calcCount
                 guard command, histResults.indices.contains(index) else { return .ignored }
                 core.copyHistoryExpression(histResults[index])
+            case .dictionary:
+                guard command, let entry = dictionaryDetail ?? selectedDefinition
+                else { return .ignored }
+                core.openInDictionary(entry)
             case .launcher:
-                if let definition, selection == 0 {
-                    guard command else { return .ignored }
-                    core.openInDictionary(definition)
-                    return .handled
-                }
                 guard command, let app = selectedAppEntry, app.canRevealInFinder
                 else { return .ignored }
                 core.showInFinder(app)
@@ -409,6 +422,10 @@ struct RootPaletteView: View {
         .onKeyPress(.escape) {
             if showActions || showAppMenu {
                 closeMenus()
+                return .handled
+            }
+            if dictionaryDetail != nil {
+                dictionaryDetail = nil
                 return .handled
             }
             core.hidePalette()
@@ -431,7 +448,7 @@ struct RootPaletteView: View {
             guard !isCollapsed else { return .handled }
             guard resultCount > 0 else { return .handled }
             // An error calc card is the selection but has no actions — don't open an empty panel.
-            if cardCount > 0, selection == 0, calcResult?.isActionable != true { return .handled }
+            if calcCount > 0, selection == 0, calcResult?.isActionable != true { return .handled }
             toggleActions()
             return .handled
         }
@@ -444,7 +461,7 @@ struct RootPaletteView: View {
                 deleteSelectedClip()
             case .calculatorHistory:
                 deleteSelectedHistoryEntry()
-            case .launcher, .emoji:
+            case .launcher, .emoji, .dictionary:
                 return .ignored
             }
             return .handled
@@ -525,19 +542,18 @@ struct RootPaletteView: View {
     @ViewBuilder
     private func content(
         apps: [AppEntry], clips: [ClipboardItem], hist: [CalcHistoryEntry],
-        emojiSections: [EmojiGridSection], calc: CalcResult?, definition: DefinitionEntry?,
+        emojiSections: [EmojiGridSection], calc: CalcResult?,
         selection: Int, favoriteCount: Int, showSections: Bool
     ) -> some View {
         switch vm.mode {
         case .launcher:
-            let offset = calc == nil && definition == nil ? 0 : 1
+            let offset = calc == nil ? 0 : 1
             let calcSelected = calc != nil && selection == 0
-            let definitionSelected = definition != nil && selection == 0
             let appIndex = selection - offset
             let selectedID = apps.indices.contains(appIndex) ? apps[appIndex].id : nil
             LauncherList(
                 results: apps,
-                selectedID: calcSelected || definitionSelected ? nil : selectedID,
+                selectedID: calcSelected ? nil : selectedID,
                 favoriteCount: favoriteCount,
                 showSections: showSections,
                 scrollToken: scrollToken,
@@ -551,12 +567,6 @@ struct RootPaletteView: View {
                     guard let calc, case .value = calc.payload else { return }
                     vm.selection = 0
                     openActions()
-                },
-                definition: definition,
-                definitionSelected: definitionSelected,
-                onActivateDefinition: {
-                    vm.selection = 0
-                    activateSelection()
                 },
                 onActivate: { core.launch($0, searchQuery: vm.query) },
                 onActions: { app in
@@ -619,6 +629,33 @@ struct RootPaletteView: View {
                     onActivate: activateSelection,
                     onActions: { entry in
                         if let index = hist.firstIndex(of: entry) { vm.selection = index + offset }
+                        openActions()
+                    }
+                )
+            }
+        case .dictionary:
+            if let detail = dictionaryDetail {
+                DictionaryDetail(entry: detail)
+            } else if dictionary.isSearching && dictResults.isEmpty {
+                EmptyResults(text: "Searching…")
+            } else if dictResults.isEmpty {
+                EmptyResults(
+                    text: isQueryEmpty
+                        ? "Type a word to define" : "No definitions found")
+            } else {
+                let selected = dictResults.indices.contains(selection)
+                    ? dictResults[selection] : nil
+                DictionaryList(
+                    results: dictResults,
+                    selectedID: selected?.id,
+                    detailed: settings.dictionaryDetailedRows,
+                    scrollToken: scrollToken,
+                    onSelect: { entry in
+                        if let index = dictResults.firstIndex(of: entry) { vm.selection = index }
+                    },
+                    onActivate: activateSelection,
+                    onActions: { entry in
+                        if let index = dictResults.firstIndex(of: entry) { vm.selection = index }
                         openActions()
                     }
                 )
@@ -691,17 +728,16 @@ struct RootPaletteView: View {
     }
 
     /// Pill label for the current selection, derived from the selection already resolved in `body` so it never re-runs the (unmemoized) `appResults` filter/sort.
-    private func actionPillLabel(
-        selectedApp: AppEntry?, calcActionable: Bool, definitionSelected: Bool
-    ) -> String {
+    private func actionPillLabel(selectedApp: AppEntry?, calcActionable: Bool) -> String {
         switch vm.mode {
         case .clipboard, .emoji:
             return vm.pasteTarget?.pasteTitle ?? "Paste"
         case .calculatorHistory:
             return "Copy Answer"
+        case .dictionary:
+            return dictionaryDetail == nil ? "Show Details" : "Copy Definition"
         case .launcher:
             if calcActionable { return "Copy Answer" }
-            if definitionSelected { return "Copy Definition" }
             switch selectedApp?.kind {
             case .systemSettings: return "Open System Setting"
             case .command: return "Run Command"
@@ -750,7 +786,7 @@ struct RootPaletteView: View {
     }
 
     private func deleteSelectedHistoryEntry() {
-        let index = selection - cardCount  // the inline calc card can't be deleted
+        let index = selection - calcCount  // the inline calc card can't be deleted
         guard histResults.indices.contains(index) else { return }
         calcHistory.remove(histResults[index])
     }
@@ -793,6 +829,11 @@ struct RootPaletteView: View {
 
     /// Back out to a fresh root search — `prepare` is the same reset used when the palette is shown (clears query/selection, bumps focusToken to refocus the field).
     private func exitToLauncher() {
+        // The detail is a screen inside the mode: back returns to the results before the launcher.
+        if dictionaryDetail != nil {
+            dictionaryDetail = nil
+            return
+        }
         vm.prepare(mode: .launcher)
     }
 
@@ -806,11 +847,7 @@ struct RootPaletteView: View {
                 core.copyCalculatorResult(calcResult)
                 return
             }
-            if let definition, selection == 0 {
-                core.copyDefinition(definition)
-                return
-            }
-            let index = selection - cardCount
+            let index = selection - calcCount
             guard appResults.indices.contains(index) else { return }
             core.launch(appResults[index], searchQuery: vm.query)
         case .clipboard:
@@ -822,9 +859,16 @@ struct RootPaletteView: View {
                 core.copyCalculatorResult(calcResult)
                 return
             }
-            let index = selection - cardCount
+            let index = selection - calcCount
             guard histResults.indices.contains(index) else { return }
             core.copyHistoryEntry(histResults[index])
+        case .dictionary:
+            if let detail = dictionaryDetail {
+                core.copyDefinition(detail)
+                return
+            }
+            guard let entry = selectedDefinition else { return }
+            dictionaryDetail = entry
         case .emoji:
             guard emojiResults.indices.contains(selection) else { return }
             core.pasteEmoji(emojiResults[selection])

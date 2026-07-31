@@ -4,6 +4,7 @@ import Foundation
 enum CommandID: String, CaseIterable, Sendable {
     case calculatorHistory = "command:calculator-history"
     case clipboardHistory = "command:clipboard-history"
+    case defineWord = "command:define-word"
     case searchEmoji = "command:search-emoji"
     case exportSettings = "command:export-settings"
     case importSettings = "command:import-settings"
@@ -17,6 +18,7 @@ enum CommandID: String, CaseIterable, Sendable {
         switch self {
         case .calculatorHistory: return "Calculator History"
         case .clipboardHistory: return "Clipboard History"
+        case .defineWord: return "Define Word"
         case .searchEmoji: return "Search Emoji & Symbols"
         case .exportSettings: return "Export Settings"
         case .importSettings: return "Import Settings"
@@ -32,6 +34,7 @@ enum CommandID: String, CaseIterable, Sendable {
         switch self {
         case .calculatorHistory: return "plus.forwardslash.minus"
         case .clipboardHistory: return "doc.on.clipboard"
+        case .defineWord: return "book"
         case .searchEmoji: return "face.smiling"
         case .exportSettings: return "square.and.arrow.up"
         case .importSettings: return "square.and.arrow.down"

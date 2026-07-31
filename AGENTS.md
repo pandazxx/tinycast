@@ -55,9 +55,8 @@ Never break these without an explicit task to do so.
 - **The app is locked to `.darkAqua` globally.** The Liquid Glass material is tuned for a dark surface
   only; do not add light-mode styling.
 - **The flat `selection` index must match the visible row order exactly**, including the inline
-  calculator or dictionary card at index 0 when present. The two cards are mutually exclusive — a
-  `define` query suppresses the calculator — so `cardCount` is only ever 0 or 1. Selection is the
-  single source of truth for highlight / activation.
+  calculator card at index 0 when present. Selection is the single source of truth for highlight /
+  activation.
 - **While a footer menu is open the palette search field never resigns first responder** — input is
   frozen instead (resigning shifts the text a point or two). See [palette.md](docs/palette.md).
 - **Focus restoration is load-bearing.** Paste targets the recorded `previousApp` and requires the

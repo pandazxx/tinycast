@@ -1,64 +1,90 @@
 import Foundation
 
-/// One definition as the palette shows it.
-struct DefinitionEntry: Equatable, Sendable {
+/// One matching word, already looked up and parsed — the row *and* the detail view read from this,
+/// so opening an entry costs nothing.
+struct DefinitionEntry: Equatable, Sendable, Identifiable {
     let term: String
     let definition: Definition
+    var id: String { term }
 }
 
-/// Owns the inline definition card's state: debounces the query, runs the blocking lookup off-main,
-/// and memoizes what it finds.
+/// Owns the dictionary mode's results: completes the partial word, looks each candidate up off-main,
+/// and drops the ones the dictionary doesn't actually define.
 @MainActor
 final class DictionaryStore: ObservableObject {
-    @Published private(set) var entry: DefinitionEntry?
+    @Published private(set) var entries: [DefinitionEntry] = []
+    /// True between a query arriving and its results landing, so the list can say so instead of
+    /// flashing "No definitions found" on the way to a result.
+    @Published private(set) var isSearching = false
 
-    /// One disk read per pause in typing rather than one per keystroke.
+    /// One round of disk reads per pause in typing rather than one per keystroke.
     private static let debounce = Duration.milliseconds(120)
-    /// Bounded so a long session can't grow this without limit — misses are cached too, since a
-    /// word the dictionary doesn't have is re-typed as often as one it does.
+    /// Each candidate costs a dictionary read, so the completion list is capped well below the ~20
+    /// the spell checker offers — past a handful nobody is reading the rows anyway.
+    private static let maxCandidates = 12
     private static let cacheLimit = 32
 
     private var task: Task<Void, Never>?
-    private var cache: [String: DefinitionEntry?] = [:]
+    private var cache: [String: [DefinitionEntry]] = [:]
     private var insertions: [String] = []
 
-    /// Drives the card. `nil` clears it — the query stopped reading as a `define` lookup.
-    func lookup(_ term: String?) {
-        guard let term, !term.isEmpty else {
+    /// Drives the list. `nil` or empty clears it.
+    func search(_ partial: String?) {
+        guard let partial, !partial.isEmpty else {
             task?.cancel()
             task = nil
-            entry = nil
+            isSearching = false
+            entries = []
             return
         }
-        let key = term.lowercased()
+        let key = partial.lowercased()
         task?.cancel()
         if let cached = cache[key] {
             task = nil
-            entry = cached
+            isSearching = false
+            entries = cached
             return
         }
+        isSearching = true
         task = Task { [weak self] in
             try? await Task.sleep(for: Self.debounce)
-            guard !Task.isCancelled else { return }
-            // Parsed off-main too: `run` is 20 KB of single-line text to walk.
-            let parsed = await Task.detached(priority: .userInitiated) {
-                DictionaryLookup.definition(for: term).map {
-                    DefinitionEntry(term: term, definition: DefinitionParser.parse($0, term: term))
+            guard !Task.isCancelled, let self else { return }
+            // Spell-check completions are AppKit and main-actor bound; the lookups they feed are not.
+            let candidates = Self.candidates(partial: partial)
+            let found = await Task.detached(priority: .userInitiated) {
+                candidates.compactMap { word -> DefinitionEntry? in
+                    guard let raw = DictionaryLookup.definition(for: word) else { return nil }
+                    return DefinitionEntry(
+                        term: word, definition: DefinitionParser.parse(raw, term: word))
                 }
             }.value
-            guard !Task.isCancelled, let self else { return }
-            self.remember(key, parsed)
+            guard !Task.isCancelled else { return }
+            self.remember(key, found)
         }
     }
 
-    /// The card is only replaced once the next result lands, so the panel doesn't strobe mid-word.
-    private func remember(_ key: String, _ result: DefinitionEntry?) {
-        if cache.updateValue(result, forKey: key) == nil {
+    /// The typed word first — it is what the user asked for, and the spell checker doesn't always
+    /// rank it first ("ru" offers "running" ahead of "run").
+    private static func candidates(partial: String) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for word in [partial] + DictionaryCompletions.words(for: partial) {
+            let key = word.lowercased()
+            guard !key.isEmpty, seen.insert(key).inserted else { continue }
+            ordered.append(word)
+            if ordered.count == maxCandidates { break }
+        }
+        return ordered
+    }
+
+    private func remember(_ key: String, _ found: [DefinitionEntry]) {
+        if cache.updateValue(found, forKey: key) == nil {
             insertions.append(key)
             if insertions.count > Self.cacheLimit {
                 cache.removeValue(forKey: insertions.removeFirst())
             }
         }
-        entry = result
+        isSearching = false
+        entries = found
     }
 }
