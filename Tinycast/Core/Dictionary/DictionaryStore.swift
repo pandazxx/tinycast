@@ -77,9 +77,11 @@ final class DictionaryStore: ObservableObject {
             let completed = ContinuousClock.now
             let batch = candidates
             let found = await Task.detached(priority: .userInitiated) {
-                Found(
-                    results: batch.results.compactMap(Self.define),
-                    suggestions: batch.suggestions.compactMap(Self.define))
+                // One `seen` across both lists: a word can only earn one row, wherever it lands.
+                var seen = Set<String>()
+                return Found(
+                    results: batch.results.compactMap { Self.define($0, seen: &seen) },
+                    suggestions: batch.suggestions.compactMap { Self.define($0, seen: &seen) })
             }.value
             guard !Task.isCancelled else { return }
             Self.logTiming(
@@ -96,9 +98,16 @@ final class DictionaryStore: ObservableObject {
         var suggestions: [String] = []
     }
 
-    private nonisolated static func define(_ word: String) -> DefinitionEntry? {
+    /// Deduplicated by the *resolved* headword, not by the candidate word. Distinct candidates share
+    /// an entry all the time — `do` and `does` both land on "do" — and since a row shows the headword
+    /// the list would otherwise repeat itself, which is what a query of `d` did.
+    private nonisolated static func define(_ word: String, seen: inout Set<String>)
+        -> DefinitionEntry?
+    {
         guard let raw = DictionaryLookup.definition(for: word) else { return nil }
-        return DefinitionEntry(term: word, definition: DefinitionParser.parse(raw, term: word))
+        let definition = DefinitionParser.parse(raw, term: word)
+        guard seen.insert(definition.headword.lowercased()).inserted else { return nil }
+        return DefinitionEntry(term: word, definition: definition)
     }
 
     /// The typed word first — it is what the user asked for, and the spell checker doesn't always
