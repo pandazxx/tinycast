@@ -118,6 +118,12 @@ another seven `switch` arms for a screen with no selection model.
 Row density follows `AppSettings.dictionaryDetailedRows`: one line (word + first sense) or two (word
 and pronunciation above, definition below).
 
+Results come in two sections. **Results** are words the query is a prefix of, from
+`NSSpellChecker.completions`; **Did you mean?** are words it might be a misspelling of, from
+`NSSpellChecker.guesses` — a different call, because completions only ever extend a prefix and so can
+never suggest `her` for `ha`. Suggestions are filtered against the results so no word appears twice,
+and the flat selection runs results-then-suggestions to match the rendered order.
+
 ## Async pipeline
 
 `DCSCopyTextDefinition` does exact lookup only — there is no public "words starting with `ru`" API —
@@ -126,7 +132,7 @@ so a query is two steps:
 1. **Complete**, on the main actor. `NSSpellChecker.completions(forPartialWordRange:…)` is AppKit and
    main-thread affine, but it returns ~20 strings and costs little. The typed word is pulled to the
    front, because the checker doesn't always rank it first (`ru` offers `running` before `run`).
-2. **Look up and parse**, off it. Each candidate is a disk read, so the list is capped at 12 and the
+2. **Look up and parse**, off it. Each candidate is a disk read, so the two lists share a cap of 12 and the
    whole batch runs in one `Task.detached(priority: .userInitiated)`. Candidates the dictionary
    doesn't define — `he's`, `serendipity's` — drop out here, which is also the spelling filter.
 
@@ -143,8 +149,8 @@ Inflection-aware and frequency-ordered beats alphabetical.
 
 | Key | Action |
 | --- | --- |
-| `↵` | Open the detail view; in the detail view, copy the definition |
-| `⌘↵` | Open the word in Dictionary.app (`dict://` via `NSWorkspace`) |
+| `↵` | List: open the detail view. Detail: open the word in Dictionary.app |
+| `⌘↵` | List: open in Dictionary.app. Detail: copy the definition |
 | `⌘K` | Actions menu: Copy Definition, Copy Word, Open in Dictionary |
 | `esc` | Pop the detail view; from the list, close the palette |
 

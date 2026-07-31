@@ -164,9 +164,13 @@ struct DictionaryTest {
             garbage.sections[0].partOfSpeech == nil
                 && garbage.sections[0].senses == ["qqq zzz wibble"])
 
+        // Invented, not a recording: every captured entry carries a `| pronunciation |`, so there is
+        // no evidence for what a bar-less one looks like. It must degrade to the raw fallback rather
+        // than guess — asserting a part of speech here would encode an assumption nothing supports.
         let noBars = DefinitionParser.parse("wibble noun a thing that wibbles", term: "wibble")
-        check("an entry with no pronunciation still finds its part of speech",
-            noBars.sections.map { $0.partOfSpeech } == ["noun"])
+        check(
+            "a bar-less entry degrades to the raw fallback",
+            noBars.sections.count == 1 && noBars.sections[0].partOfSpeech == nil)
 
         check("plainText carries every sense", r.plainText.contains("an act or spell of running"))
 

@@ -4,6 +4,9 @@ import SwiftUI
 /// them with the typed word pulled to the top. Enter opens `DictionaryDetail` for the selected row.
 struct DictionaryList: View {
     let results: [DefinitionEntry]
+    /// Rendered under "Did you mean?" below the results, and indexed after them by the flat
+    /// selection — the visible order is results then suggestions.
+    let suggestions: [DefinitionEntry]
     let selectedID: DefinitionEntry.ID?
     let detailed: Bool
     let scrollToken: UUID
@@ -11,22 +14,31 @@ struct DictionaryList: View {
     let onActivate: () -> Void
     let onActions: (DefinitionEntry) -> Void
 
+    @ViewBuilder
+    private func rows(_ entries: [DefinitionEntry]) -> some View {
+        ForEach(entries) { entry in
+            DictionaryRow(entry: entry, selected: entry.id == selectedID, detailed: detailed)
+                .id(entry.id)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onSelect(entry)
+                    onActivate()
+                }
+                .onRightClick { onActions(entry) }
+        }
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    SectionHeader(title: "Results", isFirst: true)
-                    ForEach(results) { entry in
-                        DictionaryRow(
-                            entry: entry, selected: entry.id == selectedID, detailed: detailed
-                        )
-                        .id(entry.id)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            onSelect(entry)
-                            onActivate()
-                        }
-                        .onRightClick { onActions(entry) }
+                    if !results.isEmpty {
+                        SectionHeader(title: "Results", isFirst: true)
+                        rows(results)
+                    }
+                    if !suggestions.isEmpty {
+                        SectionHeader(title: "Did you mean?", isFirst: results.isEmpty)
+                        rows(suggestions)
                     }
                 }
                 .padding(.horizontal, Theme.Spacing.md)

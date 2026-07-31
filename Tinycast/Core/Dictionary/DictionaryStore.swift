@@ -13,7 +13,11 @@ struct DefinitionEntry: Equatable, Sendable, Identifiable {
 /// and drops the ones the dictionary doesn't actually define.
 @MainActor
 final class DictionaryStore: ObservableObject {
-    @Published private(set) var entries: [DefinitionEntry] = []
+    /// Words the query is a prefix of, exact match first.
+    @Published private(set) var results: [DefinitionEntry] = []
+    /// Words the query looks like a misspelling of — shown under "Did you mean?", and never
+    /// duplicating a row already in `results`.
+    @Published private(set) var suggestions: [DefinitionEntry] = []
     /// True between a query arriving and its results landing, so the list can say so instead of
     /// flashing "No definitions found" on the way to a result.
     @Published private(set) var isSearching = false
@@ -31,7 +35,7 @@ final class DictionaryStore: ObservableObject {
         subsystem: Bundle.main.bundleIdentifier ?? "com.tinycast.app", category: "dictionary")
 
     private var task: Task<Void, Never>?
-    private var cache: [String: [DefinitionEntry]] = [:]
+    private var cache: [String: Found] = [:]
     private var insertions: [String] = []
 
     /// Drives the list. `nil` or empty clears it.
@@ -40,7 +44,8 @@ final class DictionaryStore: ObservableObject {
             task?.cancel()
             task = nil
             isSearching = false
-            entries = []
+            results = []
+            suggestions = []
             return
         }
         let key = partial.lowercased()
@@ -48,9 +53,10 @@ final class DictionaryStore: ObservableObject {
         if let cached = cache[key] {
             task = nil
             isSearching = false
-            entries = cached
+            results = cached.results
+            suggestions = cached.suggestions
             Self.log.debug(
-                "define \(partial, privacy: .private): cache hit, \(cached.count, privacy: .public) results"
+                "define \(partial, privacy: .private): cache hit, \(cached.results.count + cached.suggestions.count, privacy: .public) results"
             )
             return
         }
@@ -63,33 +69,52 @@ final class DictionaryStore: ObservableObject {
             let started = ContinuousClock.now
             let candidates = Self.candidates(partial: partial)
             let completed = ContinuousClock.now
+            let batch = candidates
             let found = await Task.detached(priority: .userInitiated) {
-                candidates.compactMap { word -> DefinitionEntry? in
-                    guard let raw = DictionaryLookup.definition(for: word) else { return nil }
-                    return DefinitionEntry(
-                        term: word, definition: DefinitionParser.parse(raw, term: word))
-                }
+                Found(
+                    results: batch.results.compactMap(Self.define),
+                    suggestions: batch.suggestions.compactMap(Self.define))
             }.value
             guard !Task.isCancelled else { return }
             Self.logTiming(
-                partial: partial, candidates: candidates.count, found: found.count,
+                partial: partial, candidates: batch.results.count + batch.suggestions.count,
+                found: found.results.count + found.suggestions.count,
                 complete: completed - started, lookup: ContinuousClock.now - completed)
             self.remember(key, found)
         }
     }
 
+    /// The two lists the mode shows, kept apart from candidate selection through to display.
+    private struct Batch: Sendable {
+        var results: [String] = []
+        var suggestions: [String] = []
+    }
+
+    private nonisolated static func define(_ word: String) -> DefinitionEntry? {
+        guard let raw = DictionaryLookup.definition(for: word) else { return nil }
+        return DefinitionEntry(term: word, definition: DefinitionParser.parse(raw, term: word))
+    }
+
     /// The typed word first — it is what the user asked for, and the spell checker doesn't always
-    /// rank it first ("ru" offers "running" ahead of "run").
-    private static func candidates(partial: String) -> [String] {
+    /// rank it first ("ru" offers "running" ahead of "run"). Corrections are filtered against the
+    /// completions so a word never appears in both lists, and the cap covers the two together
+    /// because the cost is per lookup, not per section.
+    private static func candidates(partial: String) -> Batch {
         var seen = Set<String>()
-        var ordered: [String] = []
-        for word in [partial] + DictionaryCompletions.words(for: partial) {
+        var batch = Batch()
+        for word in [partial] + DictionaryCompletions.completions(for: partial) {
             let key = word.lowercased()
             guard !key.isEmpty, seen.insert(key).inserted else { continue }
-            ordered.append(word)
-            if ordered.count == maxCandidates { break }
+            batch.results.append(word)
+            if batch.results.count == maxCandidates { return batch }
         }
-        return ordered
+        for word in DictionaryCompletions.corrections(for: partial) {
+            let key = word.lowercased()
+            guard !key.isEmpty, seen.insert(key).inserted else { continue }
+            batch.suggestions.append(word)
+            if batch.results.count + batch.suggestions.count == maxCandidates { break }
+        }
+        return batch
     }
 
     /// The per-word figure is the one that matters: it is `maxCandidates` multiplied by that number
@@ -113,7 +138,13 @@ final class DictionaryStore: ObservableObject {
         return Double(seconds) * 1_000 + Double(attoseconds) / 1_000_000_000_000_000
     }
 
-    private func remember(_ key: String, _ found: [DefinitionEntry]) {
+    /// What a completed search produced, cached as one unit so a hit restores both lists.
+    private struct Found: Sendable {
+        let results: [DefinitionEntry]
+        let suggestions: [DefinitionEntry]
+    }
+
+    private func remember(_ key: String, _ found: Found) {
         if cache.updateValue(found, forKey: key) == nil {
             insertions.append(key)
             if insertions.count > Self.cacheLimit {
@@ -121,6 +152,7 @@ final class DictionaryStore: ObservableObject {
             }
         }
         isSearching = false
-        entries = found
+        results = found.results
+        suggestions = found.suggestions
     }
 }

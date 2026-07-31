@@ -60,7 +60,10 @@ struct RootPaletteView: View {
     /// Flat grid order across sections — what `vm.selection` indexes in emoji mode.
     private var emojiResults: [EmojiEntry] { emojiSections.flatMap(\.entries) }
     /// Dictionary matches for the current query — `DictionaryStore` owns the debounce and lookups.
-    private var dictResults: [DefinitionEntry] { vm.mode == .dictionary ? dictionary.entries : [] }
+    /// Results then suggestions — the flat selection order must match the two rendered sections.
+    private var dictResults: [DefinitionEntry] {
+        vm.mode == .dictionary ? dictionary.results + dictionary.suggestions : []
+    }
 
     /// Inline calculator answer for the current query, live in both the launcher and Calculator History search; when present it occupies flat selection index 0 so rows shift by `calcCount`.
     private var calcResult: CalcResult? {
@@ -139,12 +142,14 @@ struct RootPaletteView: View {
             return PopoverMenuContent(items: [
                 PopoverMenuItem(
                     title: "Copy Definition", icon: .symbol("doc.on.doc"),
+                    shortcut: dictionaryDetail == nil ? nil : "⌘↵",
                     action: { core.copyDefinition(entry) }),
                 PopoverMenuItem(
                     title: "Copy Word", icon: .symbol("textformat"),
                     action: { core.copyWord(entry) }),
                 PopoverMenuItem(
-                    title: "Open in Dictionary", icon: .symbol("book"), shortcut: "⌘↵",
+                    title: "Open in Dictionary", icon: .symbol("book"),
+                    shortcut: dictionaryDetail == nil ? "⌘↵" : "↵",
                     action: { core.openInDictionary(entry) }),
             ])
         case .clipboard:
@@ -409,9 +414,15 @@ struct RootPaletteView: View {
                 guard command, histResults.indices.contains(index) else { return .ignored }
                 core.copyHistoryExpression(histResults[index])
             case .dictionary:
-                guard command, let entry = dictionaryDetail ?? selectedDefinition
-                else { return .ignored }
-                core.openInDictionary(entry)
+                guard command else { return .ignored }
+                // In the detail the primary key already opens Dictionary.app, so ⌘↵ is the copy.
+                if let detail = dictionaryDetail {
+                    core.copyDefinition(detail)
+                } else if let entry = selectedDefinition {
+                    core.openInDictionary(entry)
+                } else {
+                    return .ignored
+                }
             case .launcher:
                 guard command, let app = selectedAppEntry, app.canRevealInFinder
                 else { return .ignored }
@@ -646,7 +657,8 @@ struct RootPaletteView: View {
                 let selected = dictResults.indices.contains(selection)
                     ? dictResults[selection] : nil
                 DictionaryList(
-                    results: dictResults,
+                    results: dictionary.results,
+                    suggestions: dictionary.suggestions,
                     selectedID: selected?.id,
                     detailed: settings.dictionaryDetailedRows,
                     scrollToken: scrollToken,
@@ -735,7 +747,7 @@ struct RootPaletteView: View {
         case .calculatorHistory:
             return "Copy Answer"
         case .dictionary:
-            return dictionaryDetail == nil ? "Show Details" : "Copy Definition"
+            return dictionaryDetail == nil ? "Show Details" : "Open in Dictionary"
         case .launcher:
             if calcActionable { return "Copy Answer" }
             switch selectedApp?.kind {
@@ -864,7 +876,7 @@ struct RootPaletteView: View {
             core.copyHistoryEntry(histResults[index])
         case .dictionary:
             if let detail = dictionaryDetail {
-                core.copyDefinition(detail)
+                core.openInDictionary(detail)
                 return
             }
             guard let entry = selectedDefinition else { return }

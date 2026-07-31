@@ -137,6 +137,10 @@ enum DefinitionParser {
             depth -= word.filter { $0 == ")" || $0 == "]" }.count
             depth = max(0, depth)
             guard depthBefore == 0 else { continue }
+            // A part of speech only opens a section at the start of the body or straight after a
+            // sense ends. Mid-sentence they are ordinary words: `her` defines a pronoun as "used as
+            // the object of a verb or preposition to refer to…", which otherwise split into three.
+            if i > 0, let previous = words[i - 1].last, !".?!)]".contains(previous) { continue }
             if i + 1 < words.count {
                 let pair = word + " " + words[i + 1]
                 if twoWordPartsOfSpeech.contains(pair) {
