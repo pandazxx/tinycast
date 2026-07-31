@@ -90,11 +90,23 @@ _DCSCopyTextDefinition
 _DCSGetTermRangeInString
 ```
 
-Both public. A shipping app with the same feature parses the same plain-text blob rather than
-reaching for the private markup call — so the ceiling here is set by parsing, not by API access.
+Both public, and both are used here too — `DCSGetTermRangeInString` was the one lead that dump gave
+us, wired in as the miss-path fallback described above.
 
-Both symbols are now used here too — `DCSGetTermRangeInString` was the one lead the disassembly gave
-us, and it is wired in as the miss-path fallback described above.
+**Read that evidence narrowly.** `nm -u` lists undefined *C* symbols, so it rules out the private DCS
+functions — but it cannot see an Objective-C or Swift call, which goes through `objc_msgSend`. In
+particular it says nothing about AppKit's own
+`NSView.showDefinition(for:at:options:baselineOffsetHandler:)`, the public call behind the system
+Look Up panel, which renders exactly like Dictionary.app because it *is* Dictionary.app's view. An
+app whose detail pane is visually identical to Dictionary.app is more likely using that than
+reproducing the styling by hand.
+
+So the supported claim is only "no private DCS calls", not "everyone parses the blob". Checking for
+the AppKit path needs the selector table rather than the symbol table:
+
+```
+$ strings -a /Applications/Raycast.app/Contents/MacOS/Raycast | grep -i showDefinition
+```
 
 ## Layout
 
