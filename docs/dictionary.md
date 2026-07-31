@@ -93,20 +93,26 @@ _DCSGetTermRangeInString
 Both public, and both are used here too — `DCSGetTermRangeInString` was the one lead that dump gave
 us, wired in as the miss-path fallback described above.
 
-**Read that evidence narrowly.** `nm -u` lists undefined *C* symbols, so it rules out the private DCS
-functions — but it cannot see an Objective-C or Swift call, which goes through `objc_msgSend`. In
-particular it says nothing about AppKit's own
-`NSView.showDefinition(for:at:options:baselineOffsetHandler:)`, the public call behind the system
-Look Up panel, which renders exactly like Dictionary.app because it *is* Dictionary.app's view. An
-app whose detail pane is visually identical to Dictionary.app is more likely using that than
-reproducing the styling by hand.
-
-So the supported claim is only "no private DCS calls", not "everyone parses the blob". Checking for
-the AppKit path needs the selector table rather than the symbol table:
+`nm -u` only lists undefined *C* symbols, so on its own it rules out the private DCS functions but
+says nothing about an Objective-C or Swift call. In particular it can't see AppKit's
+`NSView.showDefinition(for:at:options:)` — the public call behind the system Look Up panel, which
+renders exactly like Dictionary.app because it *is* Dictionary.app's view. That is the obvious
+explanation for a detail pane that looks identical to Dictionary.app, so it was worth checking
+against the selector table too:
 
 ```
-$ strings -a /Applications/Raycast.app/Contents/MacOS/Raycast | grep -i showDefinition
+$ strings -a /Applications/Raycast.app/Contents/MacOS/Raycast | grep -i definition
+… AIToolDefinition, FunctionDefinition, GRDB's TableDefinition/ColumnDefinition/… , and
+"Find definition for a word in active dictionaries…"
 ```
+
+No `showDefinition`. The only definition-shaped strings are an ORM's schema types and the feature's
+own description — and that description confirms the dictionary feature lives in this binary, so the
+absence is meaningful rather than a case of looking in the wrong place.
+
+Between the two checks the private markup call and the system panel are both excluded, which leaves
+parsing the plain-text blob. **The ceiling here is set by parsing, not by API access** — a detail
+view that reads like Dictionary.app is a typography and completeness problem, not a missing API.
 
 ## Layout
 
