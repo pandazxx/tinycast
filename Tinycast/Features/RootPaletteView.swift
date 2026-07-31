@@ -59,10 +59,16 @@ struct RootPaletteView: View {
     }
     /// Flat grid order across sections — what `vm.selection` indexes in emoji mode.
     private var emojiResults: [EmojiEntry] { emojiSections.flatMap(\.entries) }
-    /// Dictionary matches for the current query — `DictionaryStore` owns the debounce and lookups.
-    /// Results then suggestions — the flat selection order must match the two rendered sections.
+    /// Dictionary matches for rendering — reading the published arrays is what makes `body` refresh
+    /// when a lookup lands. Results then suggestions, the order the flat selection indexes.
     private var dictResults: [DefinitionEntry] {
         vm.mode == .dictionary ? dictionary.results + dictionary.suggestions : []
+    }
+    /// The same rows for the *event-time* paths below. Deliberately the store's plain mirror rather
+    /// than its published arrays: a key handler that reads a publisher gets that publisher's next
+    /// change reported as "publishing changes from within view updates".
+    private var dictRows: [DefinitionEntry] {
+        vm.mode == .dictionary ? dictionary.rows : []
     }
 
     /// Inline calculator answer for the current query, live in both the launcher and Calculator History search; when present it occupies flat selection index 0 so rows shift by `calcCount`.
@@ -77,7 +83,7 @@ struct RootPaletteView: View {
         case .launcher: return appResults.count + calcCount
         case .clipboard: return clipResults.count
         case .calculatorHistory: return histResults.count + calcCount
-        case .dictionary: return dictionaryDetail == nil ? dictResults.count : 0
+        case .dictionary: return dictionaryDetail == nil ? dictRows.count : 0
         case .emoji: return emojiResults.count
         }
     }
@@ -111,7 +117,7 @@ struct RootPaletteView: View {
         return histResults.indices.contains(index) ? histResults[index] : nil
     }
     private var selectedDefinition: DefinitionEntry? {
-        dictResults.indices.contains(selection) ? dictResults[selection] : nil
+        dictRows.indices.contains(selection) ? dictRows[selection] : nil
     }
     private var selectedEmojiEntry: EmojiEntry? {
         emojiResults.indices.contains(selection) ? emojiResults[selection] : nil
