@@ -202,13 +202,15 @@ struct RootPaletteView: View {
         let hist = vm.mode == .calculatorHistory ? histResults : []
         let emojiSections = vm.mode == .emoji ? emojiSections : []
         let emojis = emojiSections.flatMap(\.entries)
+        // The detail view has no selectable rows, so it contributes nothing to the count.
+        let dicts = vm.mode == .dictionary && dictionaryDetail == nil ? dictResults : []
         // Newest stored clip + the reorder token: the pair changes only when the store mutates, never when a query filters the list.
         let clipFollow = ClipFollowKey(id: store.items.first?.id, token: vm.followToken)
         // Every count/selection below derives from this one calc/offset pair — the flat selection index must always match the visible row order, calc card included.
         let calc = calcResult
         let offset = calc == nil ? 0 : 1
         // Only the active mode is non-empty.
-        let count = apps.count + offset + clips.count + hist.count + emojis.count
+        let count = apps.count + offset + clips.count + hist.count + emojis.count + dicts.count
         let sel = count == 0 ? 0 : min(max(vm.selection, 0), count - 1)
         let calcSelected = calc != nil && sel == 0
         // An error card is selectable but has no action: it must not drive the Copy Answer pill, ⌘K menu, or Enter.
@@ -227,8 +229,9 @@ struct RootPaletteView: View {
                 Color.clear
             } else {
                 content(
-                    apps: apps, clips: clips, hist: hist, emojiSections: emojiSections, calc: calc,
-                    selection: sel, favoriteCount: favoriteCount, showSections: showSections
+                    apps: apps, clips: clips, hist: hist, emojiSections: emojiSections,
+                    dicts: dicts, calc: calc, selection: sel, favoriteCount: favoriteCount,
+                    showSections: showSections
                 )
             }
         }
@@ -547,7 +550,7 @@ struct RootPaletteView: View {
     @ViewBuilder
     private func content(
         apps: [AppEntry], clips: [ClipboardItem], hist: [CalcHistoryEntry],
-        emojiSections: [EmojiGridSection], calc: CalcResult?,
+        emojiSections: [EmojiGridSection], dicts: [DefinitionEntry], calc: CalcResult?,
         selection: Int, favoriteCount: Int, showSections: Bool
     ) -> some View {
         switch vm.mode {
@@ -641,27 +644,25 @@ struct RootPaletteView: View {
         case .dictionary:
             if let detail = dictionaryDetail {
                 DictionaryDetail(entry: detail)
-            } else if dictionary.isSearching && dictResults.isEmpty {
+            } else if dictionary.isSearching && dicts.isEmpty {
                 EmptyResults(text: "Searching…")
-            } else if dictResults.isEmpty {
+            } else if dicts.isEmpty {
                 EmptyResults(
-                    text: isQueryEmpty
-                        ? "Type a word to define" : "No definitions found")
+                    text: isQueryEmpty ? "Type a word to define" : "No definitions found")
             } else {
-                let selected = dictResults.indices.contains(selection)
-                    ? dictResults[selection] : nil
+                let selected = dicts.indices.contains(selection) ? dicts[selection] : nil
                 DictionaryList(
-                    results: dictionary.results,
-                    suggestions: dictionary.suggestions,
+                    entries: dicts,
+                    suggestionsStart: dictionary.results.count,
                     selectedID: selected?.id,
                     detailed: settings.dictionaryDetailedRows,
                     scrollToken: scrollToken,
                     onSelect: { entry in
-                        if let index = dictResults.firstIndex(of: entry) { vm.selection = index }
+                        if let index = dicts.firstIndex(of: entry) { vm.selection = index }
                     },
                     onActivate: activateSelection,
                     onActions: { entry in
-                        if let index = dictResults.firstIndex(of: entry) { vm.selection = index }
+                        if let index = dicts.firstIndex(of: entry) { vm.selection = index }
                         openActions()
                     }
                 )

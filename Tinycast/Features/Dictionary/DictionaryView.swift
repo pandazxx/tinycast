@@ -3,10 +3,12 @@ import SwiftUI
 /// The dictionary mode's result list: one row per matching word, ordered as the spell checker offers
 /// them with the typed word pulled to the top. Enter opens `DictionaryDetail` for the selected row.
 struct DictionaryList: View {
-    let results: [DefinitionEntry]
-    /// Rendered under "Did you mean?" below the results, and indexed after them by the flat
-    /// selection — the visible order is results then suggestions.
-    let suggestions: [DefinitionEntry]
+    /// Results then suggestions in one array, which is what the flat selection indexes — the same
+    /// shape `LauncherList` uses with `favoriteCount`, so the rendered order and the index cannot
+    /// drift apart.
+    let entries: [DefinitionEntry]
+    /// Where "Did you mean?" begins; `entries.count` when there are no suggestions.
+    let suggestionsStart: Int
     let selectedID: DefinitionEntry.ID?
     let detailed: Bool
     let scrollToken: UUID
@@ -29,7 +31,10 @@ struct DictionaryList: View {
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
+        let boundary = min(max(suggestionsStart, 0), entries.count)
+        let results = Array(entries.prefix(boundary))
+        let suggestions = Array(entries.dropFirst(boundary))
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
                     if !results.isEmpty {
