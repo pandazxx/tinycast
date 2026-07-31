@@ -10,7 +10,17 @@ struct Definition: Equatable, Sendable {
 
     struct Section: Equatable, Sendable {
         let partOfSpeech: String?
-        let senses: [String]
+        let senses: [Sense]
+    }
+
+    /// One numbered sense. The row shows `definition` alone — it has a line; the detail view has a
+    /// scroll view, so it shows the examples and the `•` sub-senses that qualify the sense too.
+    /// Sub-senses never nest further: the format has one level of bullet.
+    struct Sense: Equatable, Sendable {
+        let definition: String
+        /// The usage examples after the colon, kept verbatim including their `|` separators.
+        let example: String?
+        let subSenses: [Sense]
     }
 
     /// Flattened for the clipboard. Every sense, not just the ones the card had room for — but still
@@ -20,7 +30,13 @@ struct Definition: Equatable, Sendable {
         for section in sections {
             if let partOfSpeech = section.partOfSpeech { lines.append(partOfSpeech) }
             for (index, sense) in section.senses.enumerated() {
-                lines.append(section.senses.count > 1 ? "  \(index + 1). \(sense)" : "  \(sense)")
+                let number = section.senses.count > 1 ? "\(index + 1). " : ""
+                lines.append("  \(number)\(sense.definition)")
+                if let example = sense.example { lines.append("      \(example)") }
+                for sub in sense.subSenses {
+                    lines.append("      • \(sub.definition)")
+                    if let example = sub.example { lines.append("        \(example)") }
+                }
             }
         }
         return lines.joined(separator: "\n")
@@ -70,7 +86,11 @@ enum DefinitionParser {
             pronunciation: head.pronunciation,
             // The raw-text fallback: structure recovery failed, so show what the system gave us.
             sections: sections.isEmpty
-                ? [.init(partOfSpeech: nil, senses: [head.body])] : sections)
+                ? [
+                    .init(
+                        partOfSpeech: nil,
+                        senses: [.init(definition: head.body, example: nil, subSenses: [])])
+                ] : sections)
     }
 
     private static func dropTrailers(_ text: String) -> String {
@@ -169,7 +189,7 @@ enum DefinitionParser {
 
     /// Senses are numbered `1 2 3 …` in sequence. Requiring the *next expected* integer is what keeps
     /// `1664`, `$1,300` and `population 19,490,297` from being mistaken for sense markers.
-    private static func parseSenses(_ words: [String]) -> [String] {
+    private static func parseSenses(_ words: [String]) -> [Definition.Sense] {
         guard !words.isEmpty else { return [] }
         var starts: [Int] = []
         var expected = 1
@@ -185,46 +205,66 @@ enum DefinitionParser {
             }
         }
         guard !starts.isEmpty else {
-            let sense = cleanSense(words.joined(separator: " "))
-            return sense.isEmpty ? [] : [sense]
+            return [sense(from: words.joined(separator: " "))].compactMap { $0 }
         }
-        var senses: [String] = []
+        var senses: [Definition.Sense] = []
         // Anything before sense 1 is a grammar note, not a sense — drop it.
         for (i, start) in starts.enumerated() {
             let end = i + 1 < starts.count ? starts[i + 1] : words.count
-            let sense = cleanSense(words[(start + 1)..<end].joined(separator: " "))
-            if !sense.isEmpty { senses.append(sense) }
+            if let parsed = sense(from: words[(start + 1)..<end].joined(separator: " ")) {
+                senses.append(parsed)
+            }
         }
         return senses
     }
 
-    /// Trims a sense to its definition: sub-senses after `•` and the usage examples after the colon
-    /// are what make an entry unreadable at a glance, and both are recoverable in Dictionary.app.
-    private static func cleanSense(_ raw: String) -> String {
-        var sense = raw
-        for separator in [" • ", ": "] {
-            if let range = sense.range(of: separator) {
-                sense = String(sense[sense.startIndex..<range.lowerBound])
-            }
+    /// Splits one sense into its definition, its examples, and its `•` sub-senses. The trimming that
+    /// used to throw the last two away now happens in the view, which is what lets the detail show a
+    /// full entry while a row still shows one line.
+    private static func sense(from raw: String) -> Definition.Sense? {
+        let segments = raw.components(separatedBy: " • ")
+        guard let first = segments.first else { return nil }
+        let head = clause(first)
+        guard !head.definition.isEmpty else { return nil }
+        let subSenses =
+            segments.dropFirst()
+            .map(clause)
+            .filter { !$0.definition.isEmpty }
+            .map { Definition.Sense(definition: $0.definition, example: $0.example, subSenses: []) }
+        return Definition.Sense(
+            definition: head.definition, example: head.example, subSenses: subSenses)
+    }
+
+    /// One `definition: example` pair, with the grammar labels and inflection lists that sit between
+    /// the part of speech and the definition proper stripped off the front.
+    private static func clause(_ raw: String) -> (definition: String, example: String?) {
+        var definition = raw
+        var example: String?
+        if let separator = definition.range(of: ": ") {
+            example = String(definition[separator.upperBound...])
+                .trimmingCharacters(in: .whitespaces)
+            definition = String(definition[definition.startIndex..<separator.lowerBound])
         }
-        // Leading grammar labels and inflection lists, which sit between the part of speech and the
-        // definition proper: "[no object] say or shout", "(helloes, helloing, helloed) say or shout".
         var stripping = true
         while stripping {
             stripping = false
-            if sense.hasPrefix("["), let close = sense.firstIndex(of: "]") {
-                sense = String(sense[sense.index(after: close)...])
+            if definition.hasPrefix("["), let close = definition.firstIndex(of: "]") {
+                definition = String(definition[definition.index(after: close)...])
                     .trimmingCharacters(in: .whitespaces)
                 stripping = true
-            } else if sense.hasPrefix("("), let close = sense.firstIndex(of: ")"),
-                isInflectionList(String(sense[sense.index(after: sense.startIndex)..<close]))
+            } else if definition.hasPrefix("("), let close = definition.firstIndex(of: ")"),
+                isInflectionList(
+                    String(definition[definition.index(after: definition.startIndex)..<close]))
             {
-                sense = String(sense[sense.index(after: close)...])
+                definition = String(definition[definition.index(after: close)...])
                     .trimmingCharacters(in: .whitespaces)
                 stripping = true
             }
         }
-        return sense.trimmingCharacters(in: .whitespaces)
+        return (
+            definition.trimmingCharacters(in: .whitespaces),
+            example?.isEmpty == false ? example : nil
+        )
     }
 
     /// A comma-separated list of single words is an inflection list — `(helloes, helloing, helloed)`.

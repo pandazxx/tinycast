@@ -138,10 +138,21 @@ struct Definition: Equatable, Sendable {
 
     struct Section: Equatable, Sendable {
         let partOfSpeech: String?   // nil for the unparsed fallback
-        let senses: [String]
+        let senses: [Sense]
+    }
+
+    struct Sense: Equatable, Sendable {
+        let definition: String
+        let example: String?        // the usage examples after the colon
+        let subSenses: [Sense]      // the `•` qualifiers; never nested further
     }
 }
 ```
+
+**The parser keeps what the row throws away.** A row has one line and shows `definition` alone; the
+detail view scrolls, so it shows the examples and sub-senses too. Trimming in the view rather than in
+the parser is what closes the gap with Dictionary.app — `run`'s first verb sense is one line in a row
+and ten sub-senses in the detail.
 
 The fallback is a single `Section(partOfSpeech: nil, senses: [rawBlob])`. `sections` is never empty,
 so the view and the selection model have no special case to carry.

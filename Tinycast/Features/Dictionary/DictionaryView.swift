@@ -71,7 +71,7 @@ private struct DictionaryRow: View {
 
     /// The first sense of the first section — what the word most likely means.
     private var summary: String {
-        entry.definition.sections.first?.senses.first ?? ""
+        entry.definition.sections.first?.senses.first?.definition ?? ""
     }
 
     private var qualifier: String? {
@@ -121,6 +121,52 @@ private struct DictionaryRow: View {
     }
 }
 
+/// One sense: the definition, its examples, and the `•` sub-senses that qualify it. Only the detail
+/// view uses this — a row has one line and shows `definition` alone.
+private struct SenseView: View {
+    let sense: Definition.Sense
+    let number: Int?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.md) {
+            if let number {
+                Text("\(number)")
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                Text(sense.definition)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let example = sense.example {
+                    Text(example)
+                        .font(.callout.italic())
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(Array(sense.subSenses.enumerated()), id: \.offset) { _, sub in
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
+                        Text("•")
+                            .foregroundStyle(.tertiary)
+                        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                            Text(sub.definition)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if let example = sub.example {
+                                Text(example)
+                                    .italic()
+                                    .foregroundStyle(.tertiary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
 /// The full entry for one word, reached with Enter. Scrolls, because `run` parses to 27 senses.
 struct DictionaryDetail: View {
     let entry: DefinitionEntry
@@ -145,16 +191,9 @@ struct DictionaryDetail: View {
                                 .foregroundStyle(.secondary)
                         }
                         ForEach(Array(section.senses.enumerated()), id: \.offset) { index, sense in
-                            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.md) {
-                                if section.senses.count > 1 {
-                                    Text("\(index + 1)")
-                                        .font(.callout.monospacedDigit())
-                                        .foregroundStyle(.tertiary)
-                                }
-                                Text(sense)
-                                    .font(.callout)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
+                            SenseView(
+                                sense: sense,
+                                number: section.senses.count > 1 ? index + 1 : nil)
                         }
                     }
                 }

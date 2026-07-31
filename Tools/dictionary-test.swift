@@ -101,10 +101,10 @@ struct DictionaryTest {
             h.sections.allSatisfy { $0.partOfSpeech != nil })
         check(
             "hello exclamation sense drops its example",
-            h.sections[0].senses == ["used as a greeting or to begin a phone conversation"])
+            h.sections[0].senses.map(\.definition) == ["used as a greeting or to begin a phone conversation"])
         check(
             "hello verb sense drops the inflection list and grammar label",
-            h.sections[2].senses == ["say or shout \u{201C}hello\u{201D}; greet someone"])
+            h.sections[2].senses.map(\.definition) == ["say or shout \u{201C}hello\u{201D}; greet someone"])
 
         // run: numbered senses across two parts of speech, and every trailer marker.
         let r = DefinitionParser.parse(run, term: "run")
@@ -112,14 +112,14 @@ struct DictionaryTest {
         check("run has verb and noun", r.sections.map { $0.partOfSpeech } == ["verb", "noun"])
         check(
             "run verb sense 1 strips [no object]",
-            r.sections[0].senses.first?.hasPrefix("move at a speed faster than a walk") == true)
-        check("run noun sense 1", r.sections[1].senses.first == "an act or spell of running")
+            r.sections[0].senses.first?.definition.hasPrefix("move at a speed faster than a walk") == true)
+        check("run noun sense 1", r.sections[1].senses.first?.definition == "an act or spell of running")
         check(
             "run drops PHRASES, PHRASAL VERBS, DERIVATIVES, USAGE and ORIGIN",
-            !r.sections.contains { $0.senses.contains { $0.contains("ORIGIN") || $0.contains("PHRASES") } })
+            !r.plainText.contains("ORIGIN") && !r.plainText.contains("PHRASES"))
         check(
             "run inflections in parentheses do not become senses",
-            r.sections[0].senses.allSatisfy { !$0.hasPrefix("(runs)") })
+            r.sections[0].senses.allSatisfy { !$0.definition.hasPrefix("(runs)") })
 
         // apple: numbered senses, and parentheticals that carry meaning must survive.
         let a = DefinitionParser.parse(apple, term: "apple")
@@ -128,10 +128,10 @@ struct DictionaryTest {
         check("apple has three senses", a.sections[0].senses.count == 3)
         check(
             "apple keeps a meaningful parenthetical",
-            a.sections[0].senses[1].hasPrefix("(also apple tree)"))
+            a.sections[0].senses[1].definition.hasPrefix("(also apple tree)"))
         check(
             "apple drops the PHRASES trailer",
-            !a.sections[0].senses.contains { $0.contains("upset the applecart") })
+            !a.sections[0].senses.contains { $0.definition.contains("upset the applecart") })
 
         // serendipity: a single unnumbered sense.
         let s = DefinitionParser.parse(serendipity, term: "serendipity")
@@ -141,8 +141,7 @@ struct DictionaryTest {
             s.sections.count == 1 && s.sections[0].senses.count == 1)
         check(
             "serendipity drops its example",
-            s.sections[0].senses[0]
-                == "the occurrence and development of events by chance in a happy or beneficial way")
+            s.sections[0].senses[0].definition == "the occurrence and development of events by chance in a happy or beneficial way")
 
         // New York: no part of speech at all, and numbers in the prose that must not split senses.
         let n = DefinitionParser.parse(new_york, term: "New York")
@@ -152,12 +151,12 @@ struct DictionaryTest {
         check("New York has two senses", n.sections[0].senses.count == 2)
         check(
             "years and populations are not sense markers",
-            n.sections[0].senses[0].contains("19,490,297"))
+            n.sections[0].senses[0].definition.contains("19,490,297"))
 
         // quickly: one sense plus a sub-sense bullet.
         let q = DefinitionParser.parse(quickly, term: "quickly")
         check("quickly is one adverb sense", q.sections.map { $0.partOfSpeech } == ["adverb"])
-        check("quickly drops the sub-sense", q.sections[0].senses == ["at a fast speed; rapidly"])
+        check("quickly drops the sub-sense", q.sections[0].senses.map(\.definition) == ["at a fast speed; rapidly"])
 
         // her: the phantom-section case. "used as the object of a verb or preposition" must not
         // split, and "possessive determiner" must not be lost to the bare "determiner" it contains.
@@ -168,7 +167,7 @@ struct DictionaryTest {
             herEntry.sections.map { $0.partOfSpeech } == ["pronoun", "possessive determiner"])
         check(
             "prose mentions of verb/preposition do not split a sense",
-            herEntry.sections[0].senses.first?.hasPrefix(
+            herEntry.sections[0].senses.first?.definition.hasPrefix(
                 "used as the object of a verb or preposition") == true)
         check("her pronoun has two numbered senses", herEntry.sections[0].senses.count == 2)
         check(
@@ -179,9 +178,9 @@ struct DictionaryTest {
         check("he has pronoun then noun", heEntry.sections.map { $0.partOfSpeech } == ["pronoun", "noun"])
         check(
             "he pronoun sense drops its example and grammar label",
-            heEntry.sections[0].senses
+            heEntry.sections[0].senses.map(\.definition)
                 == ["used to refer to a man, boy, or male animal previously mentioned or easily identified"])
-        check("he noun sense", heEntry.sections[1].senses == ["a male; a man"])
+        check("he noun sense", heEntry.sections[1].senses.map(\.definition) == ["a male; a man"])
 
         // ha: `ha 1` is the first of several entries for the spelling, not a headword called "ha 1".
         let haEntry = DefinitionParser.parse(ha, term: "ha")
@@ -189,8 +188,33 @@ struct DictionaryTest {
         check("ha is one exclamation", haEntry.sections.map { $0.partOfSpeech } == ["exclamation"])
         check(
             "ha sense drops its example",
-            haEntry.sections[0].senses
+            haEntry.sections[0].senses.map(\.definition)
                 == ["used to express surprise, suspicion, triumph, or some other emotion"])
+
+        // The detail view's whole point: what a row trims away is still there.
+        check(
+            "an example is kept alongside its definition",
+            h.sections[0].senses[0].example == "hello there, Katie!.")
+        check(
+            "sub-senses after a bullet are kept",
+            h.sections[0].senses[0].subSenses.count == 3)
+        check(
+            "a sub-sense keeps its own definition and example",
+            h.sections[0].senses[0].subSenses[0].definition
+                == "British English used to express surprise"
+                && h.sections[0].senses[0].subSenses[0].example == "hello, what's all this then?.")
+        check(
+            "run's first verb sense keeps all ten sub-senses",
+            r.sections[0].senses[0].subSenses.count == 10)
+        check(
+            "sub-senses do not nest further",
+            r.sections[0].senses[0].subSenses.allSatisfy { $0.subSenses.isEmpty })
+        check(
+            "a sense with no example has none",
+            q.sections[0].senses[0].subSenses.first?.example == nil
+                || q.sections[0].senses[0].subSenses.first?.example?.isEmpty == false)
+        check("plainText carries examples", h.plainText.contains("hello there, Katie!."))
+        check("plainText carries sub-senses", h.plainText.contains("• British English"))
 
         // Degenerate input must still produce something displayable rather than crash or vanish.
         let empty = DefinitionParser.parse("", term: "zzz")
@@ -202,7 +226,7 @@ struct DictionaryTest {
         check(
             "unparseable input falls back to the raw text",
             garbage.sections[0].partOfSpeech == nil
-                && garbage.sections[0].senses == ["qqq zzz wibble"])
+                && garbage.sections[0].senses.map(\.definition) == ["qqq zzz wibble"])
 
         // Invented, not a recording: every captured entry carries a `| pronunciation |`, so there is
         // no evidence for what a bar-less one looks like. It must degrade to the raw fallback rather
