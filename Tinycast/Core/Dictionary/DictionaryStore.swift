@@ -22,11 +22,17 @@ final class DictionaryStore: ObservableObject {
     /// flashing "No definitions found" on the way to a result.
     @Published private(set) var isSearching = false
 
-    /// One round of disk reads per pause in typing rather than one per keystroke.
-    private static let debounce = Duration.milliseconds(120)
+    /// One round of disk reads per pause in typing rather than one per keystroke. Measured on a real
+    /// session the work itself is 12–68 ms, so the wait was the largest single term in how long a
+    /// result took to appear — 80 ms keeps the coalescing while giving most of that back.
+    private static let debounce = Duration.milliseconds(80)
     /// Each candidate costs a dictionary read, so the completion list is capped well below the ~20
     /// the spell checker offers — past a handful nobody is reading the rows anyway.
     private static let maxCandidates = 12
+    /// "Did you mean?" only earns its keep when little prefix-matches — and asking for it is a
+    /// second main-actor spell-checker round-trip, which measured as the only work that blocks the
+    /// UI. Below this many results it is worth the call; above, the answer is already on screen.
+    private static let suggestWhenFewerThan = 5
     private static let cacheLimit = 32
 
     /// Debug level, so the instrumentation is dropped unless someone is collecting it — NSLog would
@@ -108,6 +114,7 @@ final class DictionaryStore: ObservableObject {
             batch.results.append(word)
             if batch.results.count == maxCandidates { return batch }
         }
+        guard batch.results.count < suggestWhenFewerThan else { return batch }
         for word in DictionaryCompletions.corrections(for: partial) {
             let key = word.lowercased()
             guard !key.isEmpty, seen.insert(key).inserted else { continue }

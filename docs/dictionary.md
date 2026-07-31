@@ -73,7 +73,10 @@ single unlabelled section holding the text verbatim, so `sections` is never empt
 failure case. A definition the user can read beats a tidy model that occasionally shows nothing.
 
 `DCSGetTermRangeInString` (also public) resolves the actual term boundary, which handles multi-word
-terms and inflections (`running` → `run`). Use it to normalise the query before lookup.
+terms and trailing punctuation. `DictionaryLookup` uses it as a **fallback, not a normalisation
+step**: the string is looked up as typed first, and the term range is only tried when that misses.
+Run the other way round it could narrow a query that already resolved, so as written it can only turn
+a miss into a hit.
 
 There is **no public API for structured results** — no part of speech, no enumerated senses.
 `DCSCopyRecordsForSearchString` and `DCSCopyDefinitionMarkup` would provide them but are private and
@@ -90,9 +93,8 @@ _DCSGetTermRangeInString
 Both public. A shipping app with the same feature parses the same plain-text blob rather than
 reaching for the private markup call — so the ceiling here is set by parsing, not by API access.
 
-The asymmetry worth noting is `DCSGetTermRangeInString`, which they import and this code does not:
-it resolves the dictionary term inside a string, which is how a multi-word entry (`New York`) or an
-inflected form gets normalised before lookup. Currently the query is passed through as typed.
+Both symbols are now used here too — `DCSGetTermRangeInString` was the one lead the disassembly gave
+us, and it is wired in as the miss-path fallback described above.
 
 ## Layout
 
@@ -159,8 +161,15 @@ so a query is two steps:
    whole batch runs in one `Task.detached(priority: .userInitiated)`. Candidates the dictionary
    doesn't define — `he's`, `serendipity's` — drop out here, which is also the spelling filter.
 
-Around that: a **120 ms debounce** with cancellation so a fast typist triggers one batch rather than
+Around that: an **80 ms debounce** with cancellation so a fast typist triggers one batch rather than
 eight, and a **bounded 32-entry LRU** so backspacing through a word doesn't re-read the disk.
+
+The debounce was 120 ms until a real session was measured. The candidate cap turned out not to be the
+cost at all — lookups run 0.6–4.9 ms/word and are off the main actor — while the spell-checker call
+*is* on it, at ~12 ms median and one 65 ms outlier. That made the wait itself the largest single term
+in how long a result took to appear. Hence 80 ms, and hence the `guesses` call being skipped when the
+completions already fill the list: it is a second main-actor round-trip, and "Did you mean?" only
+earns it when few things prefix-match.
 
 Each row carries its own parsed `Definition`, so opening the detail view costs nothing.
 
