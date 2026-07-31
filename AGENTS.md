@@ -55,8 +55,9 @@ Never break these without an explicit task to do so.
 - **The app is locked to `.darkAqua` globally.** The Liquid Glass material is tuned for a dark surface
   only; do not add light-mode styling.
 - **The flat `selection` index must match the visible row order exactly**, including the inline
-  calculator card at index 0 when present. Selection is the single source of truth for highlight /
-  activation.
+  calculator or dictionary card at index 0 when present. The two cards are mutually exclusive — a
+  `define` query suppresses the calculator — so `cardCount` is only ever 0 or 1. Selection is the
+  single source of truth for highlight / activation.
 - **While a footer menu is open the palette search field never resigns first responder** — input is
   frozen instead (resigning shifts the text a point or two). See [palette.md](docs/palette.md).
 - **Focus restoration is load-bearing.** Paste targets the recorded `previousApp` and requires the
@@ -73,7 +74,9 @@ Never break these without an explicit task to do so.
   `Core/CustomCommand.swift` and `Core/ShellCommandRunner.swift` must likewise stay free of AppKit /
   SwiftUI (Foundation plus Combine for `ObservableObject` and Darwin for `mkstemp`) so
   `Tools/custom-command-test.swift` can compile them standalone — which is why the custom-command
-  confirmation gate lives in `AppCore` and not in the runner.
+  confirmation gate lives in `AppCore` and not in the runner. `Core/Dictionary/DictionaryQuery.swift`
+  is the same again for `Tools/dictionary-test.swift` — Foundation only, which is why the
+  CoreServices lookup sits in its own `DictionaryLookup.swift` rather than beside the parser.
 - **`Tools/fuzz-test.swift` holds a COPY of `FuzzyMatch`** from `Core/AppIndex.swift`. Change the
   scoring in one, mirror it in the other, or the test is meaningless.
 - **`EmojiData.generated.swift` is emitted by `node Tools/gen-emoji.js` and

@@ -101,6 +101,7 @@ final class AppCore: ObservableObject {
     let visibility = VisibilityStore()
     let calcHistory = CalculatorHistoryStore()
     let currencyRates = CurrencyRateStore()
+    let dictionary = DictionaryStore()
     let emojiIndex = EmojiIndex()
     let frequentEmoji = FrequentEmojiStore()
     let runningApps = RunningAppsMonitor()
@@ -466,6 +467,23 @@ final class AppCore: ObservableObject {
         calcHistory.record(expression: result.expression, result: display)
         hidePalette(restoreFocus: false)
         Paster.copyPlainText(copyText)
+    }
+
+    /// Enter on the inline definition card: copy the definition text.
+    func copyDefinition(_ entry: DefinitionEntry) {
+        hidePalette(restoreFocus: false)
+        Paster.copyPlainText(entry.text)
+    }
+
+    /// ⌘↵ on the definition card: hand the word to Dictionary.app for the full entry.
+    func openInDictionary(_ entry: DefinitionEntry) {
+        hidePalette(restoreFocus: false)
+        guard
+            let encoded = entry.term.addingPercentEncoding(
+                withAllowedCharacters: .urlQueryAllowed),
+            let url = URL(string: "dict://" + encoded)
+        else { return }
+        NSWorkspace.shared.open(url)
     }
 
     /// Enter on a Calculator History row: re-copy the stored answer (no re-record).

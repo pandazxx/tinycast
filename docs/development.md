@@ -84,6 +84,9 @@ swiftc -swift-version 6 Tinycast/Core/ClipboardStore.swift Tools/clipboard-test.
     -o /tmp/clipboard-test && /tmp/clipboard-test                 # clipboard store
 swiftc -swift-version 6 Tinycast/Core/SearchScopes.swift Tools/scopes-test.swift \
     -o /tmp/scopes-test && /tmp/scopes-test                       # launcher search scopes
+swiftc -swift-version 6 Tinycast/Core/Dictionary/DictionaryQuery.swift \
+    Tools/dictionary-test.swift \
+    -o /tmp/dictionary-test && /tmp/dictionary-test               # `define <word>` prefix parser
 swiftc Tinycast/Core/Emoji/EmojiCatalog.swift Tinycast/Core/Emoji/EmojiGridGeometry.swift \
     Tinycast/Core/Emoji/EmojiData.generated.swift Tools/emoji-test.swift \
     -o /tmp/emoji-test && /tmp/emoji-test                         # emoji catalog + geometry

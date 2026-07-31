@@ -1,8 +1,29 @@
 # Dictionary lookup
 
-> **Status: design, not yet implemented.** The "Alternatives considered", "Risks" and "Rollout"
-> sections exist to get the shape agreed before code is written, and should be trimmed once the
-> feature ships and this becomes a plain subsystem doc like [calculator.md](calculator.md).
+> **Status: an inline card is implemented; the mode below is not.** We are trying the cheap option
+> first to judge the feel before paying for the expensive one — see "What shipped first" and
+> "Alternatives considered". The "Risks" and "Rollout" sections should be trimmed once this settles
+> and becomes a plain subsystem doc like [calculator.md](calculator.md).
+
+## What shipped first
+
+An inline card in the launcher, mirroring the calculator's: type `define <word>` and the definition
+appears at flat selection index 0. `↵` copies it, `⌘↵` opens Dictionary.app.
+
+It exists to answer a question the design could not: **is a card enough?** The argument for the mode
+below was that a definition is paragraphs and a card would overflow — but the calculator card renders
+*inside* the launcher's `ScrollView`, so a tall card scrolls with the list rather than pushing the
+panel past its frame. That materially weakens the objection, and made the cheap option worth trying
+before committing to eleven touch points.
+
+What the card deliberately does not do: parse. It shows `DCSCopyTextDefinition`'s raw text, capped at
+eight lines. That removes the risky half of the feature from the first cut entirely — no fixtures
+needed, nothing to get wrong about an undocumented format — while still showing exactly how the
+feature feels in use.
+
+Judge it on: whether eight lines is enough to be useful, whether the raw blob is readable without
+structure, and whether losing the app results behind a card is the right trade. If the answer is
+"nearly, but it needs room", the mode below is the next step and the parser becomes worth writing.
 
 Look a word up in the dictionaries macOS already has, from the palette, without leaving it.
 
@@ -168,10 +189,11 @@ crash or produce an empty `sections`.
 
 ## Alternatives considered
 
-**An inline card in launcher mode**, like the calculator's. Far less plumbing — no new mode, three
-touch points instead of eleven. Rejected because a definition is paragraphs, not a line: the card
-would either truncate or push the panel past its fixed frame, and `PaletteWindowController` solely
-owns that frame. Worth revisiting only if we ever want a one-line gloss rather than a real entry.
+**An inline card in launcher mode**, like the calculator's. Far less plumbing — no new mode.
+Originally rejected on the grounds that a definition is paragraphs and the card would push the panel
+past the fixed frame `PaletteWindowController` owns. **That reasoning was wrong**: the calculator card
+renders inside the launcher's `ScrollView`, so a tall card scrolls with the list. The card is what
+shipped first; see "What shipped first" above.
 
 **Private DictionaryServices APIs** for structured results. Rejected — undocumented, and a silent
 break on a macOS update would be invisible until a user reported it.
