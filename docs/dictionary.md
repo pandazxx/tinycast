@@ -79,6 +79,21 @@ There is **no public API for structured results** — no part of speech, no enum
 `DCSCopyRecordsForSearchString` and `DCSCopyDefinitionMarkup` would provide them but are private and
 undocumented; they are not worth the breakage risk, and are deliberately not used.
 
+That isn't just a preference. Raycast's dictionary feature imports exactly two DCS symbols:
+
+```
+$ nm -u /Applications/Raycast.app/Contents/MacOS/Raycast | grep -i dcs
+_DCSCopyTextDefinition
+_DCSGetTermRangeInString
+```
+
+Both public. A shipping app with the same feature parses the same plain-text blob rather than
+reaching for the private markup call — so the ceiling here is set by parsing, not by API access.
+
+The asymmetry worth noting is `DCSGetTermRangeInString`, which they import and this code does not:
+it resolves the dictionary term inside a string, which is how a multi-word entry (`New York`) or an
+inflected form gets normalised before lookup. Currently the query is passed through as typed.
+
 ## Layout
 
 - `Core/Dictionary/`
