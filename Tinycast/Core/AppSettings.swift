@@ -40,6 +40,7 @@ final class AppSettings: ObservableObject {
         static let showFavoritesInCompactMode = "showFavoritesInCompactMode"
         static let searchScopes = "launcherSearchScopes"
         static let openOnCursorScreen = "openOnCursorScreen"
+        static let dictionaryDetailedRows = "dictionaryDetailedRows"
     }
 
     /// Folders (and individual `.app` bundles) `AppIndex` scans, in scan order. Editing this re-indexes — `AppIndex.start(settings:)` observes it.
@@ -99,6 +100,12 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(showFavoritesInCompactMode, forKey: Key.showFavoritesInCompactMode) }
     }
 
+    /// Give each dictionary result two lines — word and pronunciation above, definition below —
+    /// instead of packing both onto one.
+    @Published var dictionaryDetailedRows: Bool {
+        didSet { defaults.set(dictionaryDetailedRows, forKey: Key.dictionaryDetailedRows) }
+    }
+
     /// Summon the palette on the display under the pointer instead of the one holding the menu bar.
     @Published var openOnCursorScreen: Bool {
         didSet { defaults.set(openOnCursorScreen, forKey: Key.openOnCursorScreen) }
@@ -132,6 +139,7 @@ final class AppSettings: ObservableObject {
             PopToRootTimeout(rawValue: defaults.integer(forKey: Key.popToRootTimeout))
             ?? .immediately
         compactMode = defaults.bool(forKey: Key.compactMode)
+        dictionaryDetailedRows = defaults.bool(forKey: Key.dictionaryDetailedRows)
         // Defaults to true, so absence must be distinguished from a stored `false`.
         showFavoritesInCompactMode =
             defaults.object(forKey: Key.showFavoritesInCompactMode) == nil

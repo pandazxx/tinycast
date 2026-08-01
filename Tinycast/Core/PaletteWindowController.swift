@@ -117,6 +117,7 @@ final class PaletteWindowController: NSObject, NSWindowDelegate {
             .environmentObject(core.visibility)
             .environmentObject(core.calcHistory)
             .environmentObject(core.currencyRates)
+            .environmentObject(core.dictionary)
             .environmentObject(core.emojiIndex)
             .environmentObject(core.frequentEmoji)
             .environmentObject(core.runningApps)

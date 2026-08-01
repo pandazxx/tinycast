@@ -181,6 +181,19 @@ struct GeneralSettingsView: View {
                         .toggleStyle(.switch)
                         .controlSize(.small)
                 }
+
+                SettingsRow(
+                    title: "Detailed dictionary results",
+                    subtitle:
+                        "Give each Define Word result two lines — word and pronunciation above, definition below — instead of one.",
+                    systemImage: "book",
+                    tint: .brown
+                ) {
+                    Toggle("", isOn: $settings.dictionaryDetailedRows)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                }
             }
 
             SettingsCard(header: "General") {

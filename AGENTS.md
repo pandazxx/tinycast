@@ -73,7 +73,13 @@ Never break these without an explicit task to do so.
   `Core/CustomCommand.swift` and `Core/ShellCommandRunner.swift` must likewise stay free of AppKit /
   SwiftUI (Foundation plus Combine for `ObservableObject` and Darwin for `mkstemp`) so
   `Tools/custom-command-test.swift` can compile them standalone — which is why the custom-command
-  confirmation gate lives in `AppCore` and not in the runner.
+  confirmation gate lives in `AppCore` and not in the runner. `Core/Dictionary/DictionaryQuery.swift`
+  and `DefinitionParser.swift` are the same again for `Tools/dictionary-test.swift` — Foundation
+  only, which is why the CoreServices lookup sits in its own `DictionaryLookup.swift` rather than
+  beside the parsers.
+- **The dictionary fixtures in `Tools/dictionary-test.swift` are recordings.** They are real
+  `DCSCopyTextDefinition` output and the only source of truth for a format Apple doesn't document.
+  Extend them with fresh captures; never edit one to make a test pass.
 - **`Tools/fuzz-test.swift` holds a COPY of `FuzzyMatch`** from `Core/AppIndex.swift`. Change the
   scoring in one, mirror it in the other, or the test is meaningless.
 - **`EmojiData.generated.swift` is emitted by `node Tools/gen-emoji.js` and

@@ -11,6 +11,8 @@ struct RootPaletteView: View {
     /// Observed so the inline card re-evaluates the moment a fresh FX snapshot lands, or the user
     /// turns currency conversion on or off.
     @EnvironmentObject private var currencyRates: CurrencyRateStore
+    /// Observed so the result list fills in the moment an async lookup lands.
+    @EnvironmentObject private var dictionary: DictionaryStore
     @EnvironmentObject private var emojiIndex: EmojiIndex
     @EnvironmentObject private var frequentEmoji: FrequentEmojiStore
     /// Observed so a skin tone changed in Settings re-renders the grid glyphs immediately.
@@ -26,6 +28,12 @@ struct RootPaletteView: View {
     @State private var scrollToken = UUID()
     /// The emoji grid's scroll request — the lazy grid needs distinct reset/follow scroll ops, unlike the 1-D lists that recenter fine on `scrollToken`.
     @State private var emojiScroll = EmojiScrollIntent(kind: .top)
+    /// The entry opened with ↵ from the dictionary results; nil while the list is showing. A screen
+    /// inside the mode rather than a mode of its own, so the back chevron pops it before the mode.
+    @State private var dictionaryDetail: DefinitionEntry?
+    /// The detail view's scroll request. It has no selectable rows, so ↑/↓ scroll it rather than
+    /// moving a selection — plain `@State`, so nothing publishes on a keypress.
+    @State private var detailScroll = DetailScrollIntent()
 
     private var isQueryEmpty: Bool { vm.query.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -54,6 +62,11 @@ struct RootPaletteView: View {
     }
     /// Flat grid order across sections — what `vm.selection` indexes in emoji mode.
     private var emojiResults: [EmojiEntry] { emojiSections.flatMap(\.entries) }
+    /// Dictionary matches for the current query — `DictionaryStore` owns the debounce and lookups.
+    /// Results then suggestions — the flat selection order must match the two rendered sections.
+    private var dictResults: [DefinitionEntry] {
+        vm.mode == .dictionary ? dictionary.results + dictionary.suggestions : []
+    }
 
     /// Inline calculator answer for the current query, live in both the launcher and Calculator History search; when present it occupies flat selection index 0 so rows shift by `calcCount`.
     private var calcResult: CalcResult? {
@@ -67,6 +80,7 @@ struct RootPaletteView: View {
         case .launcher: return appResults.count + calcCount
         case .clipboard: return clipResults.count
         case .calculatorHistory: return histResults.count + calcCount
+        case .dictionary: return dictionaryDetail == nil ? dictResults.count : 0
         case .emoji: return emojiResults.count
         }
     }
@@ -99,6 +113,9 @@ struct RootPaletteView: View {
         let index = selection - calcCount
         return histResults.indices.contains(index) ? histResults[index] : nil
     }
+    private var selectedDefinition: DefinitionEntry? {
+        dictResults.indices.contains(selection) ? dictResults[selection] : nil
+    }
     private var selectedEmojiEntry: EmojiEntry? {
         emojiResults.indices.contains(selection) ? emojiResults[selection] : nil
     }
@@ -123,6 +140,21 @@ struct RootPaletteView: View {
                     })
             }
             return nil
+        case .dictionary:
+            guard let entry = dictionaryDetail ?? selectedDefinition else { return nil }
+            return PopoverMenuContent(items: [
+                PopoverMenuItem(
+                    title: "Copy Definition", icon: .symbol("doc.on.doc"),
+                    shortcut: dictionaryDetail == nil ? nil : "⌘↵",
+                    action: { core.copyDefinition(entry) }),
+                PopoverMenuItem(
+                    title: "Copy Word", icon: .symbol("textformat"),
+                    action: { core.copyWord(entry) }),
+                PopoverMenuItem(
+                    title: "Open in Dictionary", icon: .symbol("book"),
+                    shortcut: dictionaryDetail == nil ? "⌘↵" : "↵",
+                    action: { core.openInDictionary(entry) }),
+            ])
         case .clipboard:
             if let clip = selectedClipItem {
                 return ClipboardActionsMenu.content(
@@ -173,13 +205,15 @@ struct RootPaletteView: View {
         let hist = vm.mode == .calculatorHistory ? histResults : []
         let emojiSections = vm.mode == .emoji ? emojiSections : []
         let emojis = emojiSections.flatMap(\.entries)
+        // The detail view has no selectable rows, so it contributes nothing to the count.
+        let dicts = vm.mode == .dictionary && dictionaryDetail == nil ? dictResults : []
         // Newest stored clip + the reorder token: the pair changes only when the store mutates, never when a query filters the list.
         let clipFollow = ClipFollowKey(id: store.items.first?.id, token: vm.followToken)
         // Every count/selection below derives from this one calc/offset pair — the flat selection index must always match the visible row order, calc card included.
         let calc = calcResult
         let offset = calc == nil ? 0 : 1
         // Only the active mode is non-empty.
-        let count = apps.count + offset + clips.count + hist.count + emojis.count
+        let count = apps.count + offset + clips.count + hist.count + emojis.count + dicts.count
         let sel = count == 0 ? 0 : min(max(vm.selection, 0), count - 1)
         let calcSelected = calc != nil && sel == 0
         // An error card is selectable but has no action: it must not drive the Copy Answer pill, ⌘K menu, or Enter.
@@ -190,7 +224,10 @@ struct RootPaletteView: View {
         let selectedApp = apps.indices.contains(sel - offset) ? apps[sel - offset] : nil
         // Derive the footer label from the already-resolved selection so `bottomBar` doesn't re-run `appResults` (its filter/sort aren't memoized). The primary/Actions group is hidden when there's nothing to act on: no results in any mode, or an error calc card (selectable but action-less).
         let pillLabel = actionPillLabel(selectedApp: selectedApp, calcActionable: calcActionable)
-        let showActionGroup = count > 0 && !(calcSelected && !calcActionable)
+        // The dictionary detail has no selectable rows but does have actions — ↵ opens
+        // Dictionary.app, ⌘↵ copies — so the footer group stays up even though `count` is 0.
+        let showActionGroup =
+            (count > 0 || dictionaryDetail != nil) && !(calcSelected && !calcActionable)
 
         // The `header` (and its single search field) is always attached in the same position via safeAreaInset so its focus survives the compact↔expanded swap — only the results below it toggle. Collapsed shows the bar alone; expanded floats header + action bar over the list with edge-dissolve (see docs/ui.md).
         return Group {
@@ -198,8 +235,9 @@ struct RootPaletteView: View {
                 Color.clear
             } else {
                 content(
-                    apps: apps, clips: clips, hist: hist, emojiSections: emojiSections, calc: calc,
-                    selection: sel, favoriteCount: favoriteCount, showSections: showSections
+                    apps: apps, clips: clips, hist: hist, emojiSections: emojiSections,
+                    dicts: dicts, calc: calc, selection: sel, favoriteCount: favoriteCount,
+                    showSections: showSections
                 )
             }
         }
@@ -253,12 +291,19 @@ struct RootPaletteView: View {
             vm.selection = 0
             scrollToken = UUID()
             emojiScroll = EmojiScrollIntent(kind: .top)
+            dictionaryDetail = nil
+            // Deferred to the next tick: `onChange` can run inside the view update, and both the
+            // hand-off (which rewrites `vm.query`, re-entering this handler) and the store's reset
+            // publish — which SwiftUI faults on as "publishing changes from within view updates".
+            Task { @MainActor in reactToDictionaryQuery() }
         }
         .onChange(of: vm.mode) {
             vm.selection = 0
             showActions = false
             scrollToken = UUID()
             emojiScroll = EmojiScrollIntent(kind: .top)
+            dictionaryDetail = nil
+            Task { @MainActor in dictionary.search(vm.mode == .dictionary ? vm.query : nil) }
         }
         // Pop-to-root: `prepare` clears query/selection, but if both were already at their defaults the handlers above never fire — this token guarantees the scroll itself snaps back to the top.
         .onChange(of: vm.resetToken) {
@@ -321,7 +366,13 @@ struct RootPaletteView: View {
                 moveMenu(1)
                 return .handled
             }
-            if vm.mode == .emoji { moveEmojiRow(1) } else { move(1) }
+            if dictionaryDetail != nil {
+                scrollDetail(1)
+            } else if vm.mode == .emoji {
+                moveEmojiRow(1)
+            } else {
+                move(1)
+            }
             return .handled
         }
         .onKeyPress(.upArrow) {
@@ -330,7 +381,13 @@ struct RootPaletteView: View {
                 moveMenu(-1)
                 return .handled
             }
-            if vm.mode == .emoji { moveEmojiRow(-1) } else { move(-1) }
+            if dictionaryDetail != nil {
+                scrollDetail(-1)
+            } else if vm.mode == .emoji {
+                moveEmojiRow(-1)
+            } else {
+                move(-1)
+            }
             return .handled
         }
         // Horizontal arrows step the emoji grid; everywhere else they stay with the field editor's caret. An open menu swallows them so the list behind never moves.
@@ -371,6 +428,16 @@ struct RootPaletteView: View {
                 let index = selection - calcCount
                 guard command, histResults.indices.contains(index) else { return .ignored }
                 core.copyHistoryExpression(histResults[index])
+            case .dictionary:
+                guard command else { return .ignored }
+                // In the detail the primary key already opens Dictionary.app, so ⌘↵ is the copy.
+                if let detail = dictionaryDetail {
+                    core.copyDefinition(detail)
+                } else if let entry = selectedDefinition {
+                    core.openInDictionary(entry)
+                } else {
+                    return .ignored
+                }
             case .launcher:
                 guard command, let app = selectedAppEntry, app.canRevealInFinder
                 else { return .ignored }
@@ -381,6 +448,10 @@ struct RootPaletteView: View {
         .onKeyPress(.escape) {
             if showActions || showAppMenu {
                 closeMenus()
+                return .handled
+            }
+            if dictionaryDetail != nil {
+                dictionaryDetail = nil
                 return .handled
             }
             core.hidePalette()
@@ -401,7 +472,9 @@ struct RootPaletteView: View {
             guard press.modifiers.contains(.command) else { return .ignored }
             // The Actions menu has no anchor in the compact bar (no bottom bar); swallow ⌘K there.
             guard !isCollapsed else { return .handled }
-            guard resultCount > 0 else { return .handled }
+            // The dictionary detail has no rows, so `resultCount` is 0 there — but it does have
+            // actions, the same three the list offers for the entry it is showing.
+            guard resultCount > 0 || dictionaryDetail != nil else { return .handled }
             // An error calc card is the selection but has no actions — don't open an empty panel.
             if calcCount > 0, selection == 0, calcResult?.isActionable != true { return .handled }
             toggleActions()
@@ -416,7 +489,7 @@ struct RootPaletteView: View {
                 deleteSelectedClip()
             case .calculatorHistory:
                 deleteSelectedHistoryEntry()
-            case .launcher, .emoji:
+            case .launcher, .emoji, .dictionary:
                 return .ignored
             }
             return .handled
@@ -497,7 +570,7 @@ struct RootPaletteView: View {
     @ViewBuilder
     private func content(
         apps: [AppEntry], clips: [ClipboardItem], hist: [CalcHistoryEntry],
-        emojiSections: [EmojiGridSection], calc: CalcResult?,
+        emojiSections: [EmojiGridSection], dicts: [DefinitionEntry], calc: CalcResult?,
         selection: Int, favoriteCount: Int, showSections: Bool
     ) -> some View {
         switch vm.mode {
@@ -588,6 +661,35 @@ struct RootPaletteView: View {
                     }
                 )
             }
+        case .dictionary:
+            if let detail = dictionaryDetail {
+                // Keyed on the entry so opening a different word starts at the top rather than
+                // inheriting the last one's scroll offset.
+                DictionaryDetail(entry: detail, scroll: detailScroll)
+                    .id(detail.id)
+            } else if dictionary.isSearching && dicts.isEmpty {
+                EmptyResults(text: "Searching…")
+            } else if dicts.isEmpty {
+                EmptyResults(
+                    text: isQueryEmpty ? "Type a word to define" : "No definitions found")
+            } else {
+                let selected = dicts.indices.contains(selection) ? dicts[selection] : nil
+                DictionaryList(
+                    entries: dicts,
+                    suggestionsStart: dictionary.results.count,
+                    selectedID: selected?.id,
+                    detailed: settings.dictionaryDetailedRows,
+                    scrollToken: scrollToken,
+                    onSelect: { entry in
+                        if let index = dicts.firstIndex(of: entry) { vm.selection = index }
+                    },
+                    onActivate: activateSelection,
+                    onActions: { entry in
+                        if let index = dicts.firstIndex(of: entry) { vm.selection = index }
+                        openActions()
+                    }
+                )
+            }
         case .emoji:
             if !emojiIndex.isLoaded {
                 EmptyResults(text: "Loading emoji…")
@@ -662,6 +764,8 @@ struct RootPaletteView: View {
             return vm.pasteTarget?.pasteTitle ?? "Paste"
         case .calculatorHistory:
             return "Copy Answer"
+        case .dictionary:
+            return dictionaryDetail == nil ? "Show Details" : "Open in Dictionary"
         case .launcher:
             if calcActionable { return "Copy Answer" }
             switch selectedApp?.kind {
@@ -726,6 +830,12 @@ struct RootPaletteView: View {
         emojiScroll = EmojiScrollIntent(kind: .follow)
     }
 
+    /// Scroll the detail view. The clamping lives in the view, which is the only place that knows
+    /// the content's extent — this just states the direction.
+    private func scrollDetail(_ steps: Int) {
+        detailScroll = DetailScrollIntent(steps: steps)
+    }
+
     /// Move the open menu's highlight, clamped at the ends (no wrap — consistent with `move`).
     private func moveMenu(_ delta: Int) {
         guard let count = menuContent?.items.count, count > 0 else { return }
@@ -754,7 +864,25 @@ struct RootPaletteView: View {
     }
 
     /// Back out to a fresh root search — `prepare` is the same reset used when the palette is shown (clears query/selection, bumps focusToken to refocus the field).
+    /// `define <word>` in the launcher hands off to the dictionary mode carrying just the word, so
+    /// the field reads as that mode's own search instead of keeping a dead prefix. Re-entrant by
+    /// design: rewriting the query fires the change handler again, and the second pass falls through
+    /// to the search because the mode is no longer `.launcher`.
+    private func reactToDictionaryQuery() {
+        if vm.mode == .launcher, let term = DictionaryQuery.term(in: vm.query) {
+            vm.mode = .dictionary
+            vm.query = term
+            return
+        }
+        if vm.mode == .dictionary { dictionary.search(vm.query) }
+    }
+
     private func exitToLauncher() {
+        // The detail is a screen inside the mode: back returns to the results before the launcher.
+        if dictionaryDetail != nil {
+            dictionaryDetail = nil
+            return
+        }
         vm.prepare(mode: .launcher)
     }
 
@@ -783,6 +911,14 @@ struct RootPaletteView: View {
             let index = selection - calcCount
             guard histResults.indices.contains(index) else { return }
             core.copyHistoryEntry(histResults[index])
+        case .dictionary:
+            if let detail = dictionaryDetail {
+                core.openInDictionary(detail)
+                return
+            }
+            guard let entry = selectedDefinition else { return }
+            detailScroll = DetailScrollIntent()
+            dictionaryDetail = entry
         case .emoji:
             guard emojiResults.indices.contains(selection) else { return }
             core.pasteEmoji(emojiResults[selection])
