@@ -172,43 +172,70 @@ private struct SenseView: View {
     }
 }
 
-/// The full entry for one word, reached with Enter. Scrolls, because `run` parses to 27 senses.
+/// The full entry for one word, reached with Enter. Scrolls, because `run` parses to 27 senses —
+/// and ↑/↓ walk them, since there are no selectable rows here for the normal selection to move
+/// through.
 struct DictionaryDetail: View {
     let entry: DefinitionEntry
+    /// Flat index across every section's senses; the row `scrollToken` should bring into view.
+    let focusedSense: Int
+    let scrollToken: UUID
+
+    /// Where each section's senses start in the flat index, so a sense's anchor id can be derived
+    /// while still rendering the sections grouped.
+    private var sectionStarts: [Int] {
+        var starts: [Int] = []
+        var running = 0
+        for section in entry.definition.sections {
+            starts.append(running)
+            running += section.senses.count
+        }
+        return starts
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.xxl) {
-                HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.md) {
-                    Text(entry.definition.headword)
-                        .font(.title2.weight(.semibold))
-                    if let pronunciation = entry.definition.pronunciation {
-                        Text(pronunciation)
-                            .font(.body)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                ForEach(Array(entry.definition.sections.enumerated()), id: \.offset) { _, section in
-                    VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                        if let partOfSpeech = section.partOfSpeech {
-                            Text(partOfSpeech)
-                                .font(.body.italic())
-                                .foregroundStyle(.secondary)
-                        }
-                        ForEach(Array(section.senses.enumerated()), id: \.offset) { index, sense in
-                            SenseView(
-                                sense: sense,
-                                number: section.senses.count > 1 ? index + 1 : nil)
+        let starts = sectionStarts
+        return ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xxl) {
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.md) {
+                        Text(entry.definition.headword)
+                            .font(.title2.weight(.semibold))
+                        if let pronunciation = entry.definition.pronunciation {
+                            Text(pronunciation)
+                                .font(.body)
+                                .foregroundStyle(.tertiary)
                         }
                     }
+                    ForEach(Array(entry.definition.sections.enumerated()), id: \.offset) {
+                        sectionIndex, section in
+                        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                            if let partOfSpeech = section.partOfSpeech {
+                                Text(partOfSpeech)
+                                    .font(.body.italic())
+                                    .foregroundStyle(.secondary)
+                            }
+                            ForEach(Array(section.senses.enumerated()), id: \.offset) {
+                                index, sense in
+                                SenseView(
+                                    sense: sense,
+                                    number: section.senses.count > 1 ? index + 1 : nil
+                                )
+                                .id(starts[sectionIndex] + index)
+                            }
+                        }
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Theme.Spacing.xxl)
+                .padding(.vertical, Theme.Spacing.xxl)
+                .hideNativeScrollers()
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Theme.Spacing.xxl)
-            .padding(.vertical, Theme.Spacing.xxl)
-            .hideNativeScrollers()
+            .edgeDissolve()
+            .thinScrollbar()
+            .onChange(of: scrollToken) {
+                proxy.scrollTo(focusedSense, anchor: .center)
+            }
         }
-        .edgeDissolve()
-        .thinScrollbar()
     }
 }

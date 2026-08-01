@@ -169,6 +169,12 @@ than a mode of its own — `resultCount` drops to 0 while it is up (nothing ther
 Escape and the back chevron pop it before leaving the mode. A second `PaletteMode` would have meant
 another seven `switch` arms for a screen with no selection model.
 
+Because it has no rows, ↑/↓ there walk the entry a **sense** at a time rather than moving a
+selection, anchoring on senses so ↓ always lands on something readable. That runs off plain `@State`
+and the `ScrollViewReader` every list already has — no publisher touched on a keypress, and no
+scroll-offset API. The footer's action group stays visible even though `count` is 0, because ↵ and
+⌘K both still do something there.
+
 Row density follows `AppSettings.dictionaryDetailedRows`: one line (word + first sense) or two (word
 and pronunciation above, definition below).
 
@@ -214,6 +220,7 @@ Inflection-aware and frequency-ordered beats alphabetical.
 | `⌘↵` | List: open in Dictionary.app. Detail: copy the definition |
 | `⌘K` | Actions menu: Copy Definition, Copy Word, Open in Dictionary |
 | `esc` | Pop the detail view; from the list, close the palette |
+| `↑` / `↓` | List: move the selection. Detail: walk the entry a sense at a time |
 
 `⌘⌫` has no meaning here and stays `.ignored`.
 

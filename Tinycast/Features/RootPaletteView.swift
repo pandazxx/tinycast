@@ -31,6 +31,9 @@ struct RootPaletteView: View {
     /// The entry opened with ↵ from the dictionary results; nil while the list is showing. A screen
     /// inside the mode rather than a mode of its own, so the back chevron pops it before the mode.
     @State private var dictionaryDetail: DefinitionEntry?
+    /// Which sense the detail view is scrolled to. The detail has no selectable rows, so ↑/↓ walk
+    /// the entry instead — plain `@State`, so nothing publishes on a keypress.
+    @State private var detailSense = 0
 
     private var isQueryEmpty: Bool { vm.query.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -221,7 +224,10 @@ struct RootPaletteView: View {
         let selectedApp = apps.indices.contains(sel - offset) ? apps[sel - offset] : nil
         // Derive the footer label from the already-resolved selection so `bottomBar` doesn't re-run `appResults` (its filter/sort aren't memoized). The primary/Actions group is hidden when there's nothing to act on: no results in any mode, or an error calc card (selectable but action-less).
         let pillLabel = actionPillLabel(selectedApp: selectedApp, calcActionable: calcActionable)
-        let showActionGroup = count > 0 && !(calcSelected && !calcActionable)
+        // The dictionary detail has no selectable rows but does have actions — ↵ opens
+        // Dictionary.app, ⌘↵ copies — so the footer group stays up even though `count` is 0.
+        let showActionGroup =
+            (count > 0 || dictionaryDetail != nil) && !(calcSelected && !calcActionable)
 
         // The `header` (and its single search field) is always attached in the same position via safeAreaInset so its focus survives the compact↔expanded swap — only the results below it toggle. Collapsed shows the bar alone; expanded floats header + action bar over the list with edge-dissolve (see docs/ui.md).
         return Group {
@@ -360,7 +366,13 @@ struct RootPaletteView: View {
                 moveMenu(1)
                 return .handled
             }
-            if vm.mode == .emoji { moveEmojiRow(1) } else { move(1) }
+            if let detail = dictionaryDetail {
+                moveDetail(1, in: detail)
+            } else if vm.mode == .emoji {
+                moveEmojiRow(1)
+            } else {
+                move(1)
+            }
             return .handled
         }
         .onKeyPress(.upArrow) {
@@ -369,7 +381,13 @@ struct RootPaletteView: View {
                 moveMenu(-1)
                 return .handled
             }
-            if vm.mode == .emoji { moveEmojiRow(-1) } else { move(-1) }
+            if let detail = dictionaryDetail {
+                moveDetail(-1, in: detail)
+            } else if vm.mode == .emoji {
+                moveEmojiRow(-1)
+            } else {
+                move(-1)
+            }
             return .handled
         }
         // Horizontal arrows step the emoji grid; everywhere else they stay with the field editor's caret. An open menu swallows them so the list behind never moves.
@@ -643,7 +661,8 @@ struct RootPaletteView: View {
             }
         case .dictionary:
             if let detail = dictionaryDetail {
-                DictionaryDetail(entry: detail)
+                DictionaryDetail(
+                    entry: detail, focusedSense: detailSense, scrollToken: scrollToken)
             } else if dictionary.isSearching && dicts.isEmpty {
                 EmptyResults(text: "Searching…")
             } else if dicts.isEmpty {
@@ -807,6 +826,16 @@ struct RootPaletteView: View {
         emojiScroll = EmojiScrollIntent(kind: .follow)
     }
 
+    /// Walk the detail view a sense at a time. Anchoring on senses rather than a pixel step means
+    /// ↓ always lands on something readable, and it reuses the `ScrollViewReader` every list already
+    /// has rather than reaching for scroll-offset APIs.
+    private func moveDetail(_ delta: Int, in entry: DefinitionEntry) {
+        let senses = entry.definition.sections.reduce(0) { $0 + $1.senses.count }
+        guard senses > 0 else { return }
+        detailSense = min(max(detailSense + delta, 0), senses - 1)
+        scrollToken = UUID()
+    }
+
     /// Move the open menu's highlight, clamped at the ends (no wrap — consistent with `move`).
     private func moveMenu(_ delta: Int) {
         guard let count = menuContent?.items.count, count > 0 else { return }
@@ -888,6 +917,7 @@ struct RootPaletteView: View {
                 return
             }
             guard let entry = selectedDefinition else { return }
+            detailSense = 0
             dictionaryDetail = entry
         case .emoji:
             guard emojiResults.indices.contains(selection) else { return }
