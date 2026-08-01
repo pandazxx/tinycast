@@ -1,8 +1,5 @@
 # Dictionary lookup
 
-> **Status: implemented.** The "Alternatives considered" and "Risks" sections are kept because the
-> shape changed twice while building; trim them once it settles.
-
 Look words up in the dictionaries macOS already has, from the palette, without leaving it.
 
 ## User journey
@@ -276,26 +273,18 @@ would make an offline feature depend on model availability.
 **`dict://` only**, punting to Dictionary.app. That is the `⌘↵` action, not the feature — it leaves
 the palette, which is the thing the palette exists to avoid.
 
-## Risks and open questions
+## Known gaps
 
-- **The blob format is the whole risk.** Mitigated by the raw fallback and by fixture-driven tests,
-  but the parser's real-world accuracy cannot be judged until we have real output.
-- **A user with no dictionaries enabled**, or a non-English system, gets `NULL`. The empty state must
-  say something better than "No results" — it should name the cause and point at Dictionary.app's
-  preferences.
-- **Inflections and phrases** may miss even when the base word exists. `DCSGetTermRangeInString`
-  helps; `NSSpellChecker.completions(forPartialWordRange:)` is a possible "did you mean" follow-up,
-  deliberately out of scope for the first cut.
-- **Open: capture fixtures.** This is the one step that needs a Mac. Everything else can be built and
-  tested from the container plus CI. Until then the parser is written against a format described from
-  memory, which is exactly the kind of assumption that should not reach `main` unverified.
-- **Open: does the prefix consume the word?** Proposed: `define ` (with the trailing space) switches
-  mode and hands the remainder over, so the field shows just the word. The alternative — keeping
-  `define apple` in the field — is simpler but leaves dead text the user has to delete to search a
-  second word.
+- **A user with no dictionaries enabled**, or one whose language has none, gets `NULL` for every
+  word and an empty list. The empty state says "No definitions found", which is true but unhelpful —
+  it should name the cause and point at Dictionary.app's preferences.
+- **The 56 pt detail scroll step is a guess**, roughly two lines of body text. One constant in
+  `DictionaryDetail`.
+- **`ScrollPosition` is used here and nowhere else** in the app. If a second screen needs keyboard
+  scrolling, the step-and-clamp logic is worth lifting into a modifier next to `EdgeDissolve` rather
+  than copying.
 
-## Rollout
-
-Shipped. The `NSSpellChecker` completion source, the 12-candidate cap and the 120 ms debounce are the
-knobs most likely to need tuning once it has been used in anger — each candidate costs a dictionary
-read, so the cap is the one that governs how the mode feels.
+The tuning knobs, in the order they affect how the mode feels: `maxCandidates` (12) multiplies the
+per-word lookup cost, `debounce` (80 ms) is the largest single term in how long a result takes to
+appear, and `suggestWhenFewerThan` (5) decides when a second spell-checker round-trip is worth
+paying for.
