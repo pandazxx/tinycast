@@ -226,7 +226,7 @@ Inflection-aware and frequency-ordered beats alphabetical.
 | --- | --- |
 | `↵` | List: open the detail view. Detail: open the word in Dictionary.app |
 | `⌘↵` | List: open in Dictionary.app. Detail: copy the definition |
-| `⌘K` | Actions menu: Copy Definition, Copy Word, Open in Dictionary |
+| `⌘K` | Actions menu: Copy Definition, Copy Word, Open in Dictionary — in both the list and the detail |
 | `esc` | Pop the detail view; from the list, close the palette |
 | `↑` / `↓` | List: move the selection. Detail: scroll |
 

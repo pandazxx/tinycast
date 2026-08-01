@@ -472,7 +472,9 @@ struct RootPaletteView: View {
             guard press.modifiers.contains(.command) else { return .ignored }
             // The Actions menu has no anchor in the compact bar (no bottom bar); swallow ⌘K there.
             guard !isCollapsed else { return .handled }
-            guard resultCount > 0 else { return .handled }
+            // The dictionary detail has no rows, so `resultCount` is 0 there — but it does have
+            // actions, the same three the list offers for the entry it is showing.
+            guard resultCount > 0 || dictionaryDetail != nil else { return .handled }
             // An error calc card is the selection but has no actions — don't open an empty panel.
             if calcCount > 0, selection == 0, calcResult?.isActionable != true { return .handled }
             toggleActions()
