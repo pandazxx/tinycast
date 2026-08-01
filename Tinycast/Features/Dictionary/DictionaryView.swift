@@ -172,70 +172,87 @@ private struct SenseView: View {
     }
 }
 
-/// The full entry for one word, reached with Enter. Scrolls, because `run` parses to 27 senses —
-/// and ↑/↓ walk them, since there are no selectable rows here for the normal selection to move
-/// through.
+/// A scroll request for the detail view: a signed step, plus a nonce so back-to-back presses of the
+/// same arrow still fire `onChange`. Mirrors `EmojiScrollIntent`.
+struct DetailScrollIntent: Equatable {
+    var steps: Int = 0
+    var nonce = UUID()
+}
+
+/// The full entry for one word, reached with Enter. ↑/↓ scroll it by a fixed step rather than moving
+/// between anchors: anchoring can't reach the true top or bottom — `.center` on the first sense
+/// leaves the headword clipped above it — and it reads as jumping rather than scrolling.
 struct DictionaryDetail: View {
     let entry: DefinitionEntry
-    /// Flat index across every section's senses; the row `scrollToken` should bring into view.
-    let focusedSense: Int
-    let scrollToken: UUID
+    let scroll: DetailScrollIntent
 
-    /// Where each section's senses start in the flat index, so a sense's anchor id can be derived
-    /// while still rendering the sections grouped.
-    private var sectionStarts: [Int] {
-        var starts: [Int] = []
-        var running = 0
-        for section in entry.definition.sections {
-            starts.append(running)
-            running += section.senses.count
-        }
-        return starts
+    /// Roughly two lines of body text, so a press moves a readable amount without losing your place.
+    private static let step: CGFloat = 56
+
+    @State private var position = ScrollPosition()
+    @State private var metrics = Metrics()
+
+    /// What the arrows need: where we are, and how far there is left to go.
+    private struct Metrics: Equatable {
+        var offset: CGFloat = 0
+        /// The largest offset that still shows content — scrolling past it just leaves blank space.
+        var maximum: CGFloat = 0
     }
 
     var body: some View {
-        let starts = sectionStarts
-        return ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xxl) {
-                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.md) {
-                        Text(entry.definition.headword)
-                            .font(.title2.weight(.semibold))
-                        if let pronunciation = entry.definition.pronunciation {
-                            Text(pronunciation)
-                                .font(.body)
-                                .foregroundStyle(.tertiary)
-                        }
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xxl) {
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.md) {
+                    Text(entry.definition.headword)
+                        .font(.title2.weight(.semibold))
+                    if let pronunciation = entry.definition.pronunciation {
+                        Text(pronunciation)
+                            .font(.body)
+                            .foregroundStyle(.tertiary)
                     }
-                    ForEach(Array(entry.definition.sections.enumerated()), id: \.offset) {
-                        sectionIndex, section in
-                        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                            if let partOfSpeech = section.partOfSpeech {
-                                Text(partOfSpeech)
-                                    .font(.body.italic())
-                                    .foregroundStyle(.secondary)
-                            }
-                            ForEach(Array(section.senses.enumerated()), id: \.offset) {
-                                index, sense in
-                                SenseView(
-                                    sense: sense,
-                                    number: section.senses.count > 1 ? index + 1 : nil
-                                )
-                                .id(starts[sectionIndex] + index)
-                            }
+                }
+                ForEach(Array(entry.definition.sections.enumerated()), id: \.offset) { _, section in
+                    VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                        if let partOfSpeech = section.partOfSpeech {
+                            Text(partOfSpeech)
+                                .font(.body.italic())
+                                .foregroundStyle(.secondary)
+                        }
+                        ForEach(Array(section.senses.enumerated()), id: \.offset) { index, sense in
+                            SenseView(
+                                sense: sense,
+                                number: section.senses.count > 1 ? index + 1 : nil)
                         }
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Theme.Spacing.xxl)
-                .padding(.vertical, Theme.Spacing.xxl)
-                .hideNativeScrollers()
             }
-            .edgeDissolve()
-            .thinScrollbar()
-            .onChange(of: scrollToken) {
-                proxy.scrollTo(focusedSense, anchor: .center)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Theme.Spacing.xxl)
+            .padding(.vertical, Theme.Spacing.xxl)
+            .hideNativeScrollers()
+        }
+        .scrollPosition($position)
+        // The same geometry the scrollbar reads, kept so the arrows can clamp to the real extent
+        // instead of running off either end.
+        .onScrollGeometryChange(for: Metrics.self) { geo in
+            Metrics(
+                offset: geo.contentOffset.y + geo.contentInsets.top,
+                maximum: max(
+                    0,
+                    geo.contentSize.height + geo.contentInsets.top + geo.contentInsets.bottom
+                        - geo.containerSize.height))
+        } action: { _, new in
+            metrics = new
+        }
+        .onChange(of: scroll) {
+            guard scroll.steps != 0 else { return }
+            let target = min(
+                max(metrics.offset + CGFloat(scroll.steps) * Self.step, 0), metrics.maximum)
+            withAnimation(.easeOut(duration: 0.12)) {
+                position.scrollTo(y: target)
             }
         }
+        .edgeDissolve()
+        .thinScrollbar()
     }
 }

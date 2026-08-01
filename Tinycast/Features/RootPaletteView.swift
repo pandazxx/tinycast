@@ -31,9 +31,9 @@ struct RootPaletteView: View {
     /// The entry opened with ↵ from the dictionary results; nil while the list is showing. A screen
     /// inside the mode rather than a mode of its own, so the back chevron pops it before the mode.
     @State private var dictionaryDetail: DefinitionEntry?
-    /// Which sense the detail view is scrolled to. The detail has no selectable rows, so ↑/↓ walk
-    /// the entry instead — plain `@State`, so nothing publishes on a keypress.
-    @State private var detailSense = 0
+    /// The detail view's scroll request. It has no selectable rows, so ↑/↓ scroll it rather than
+    /// moving a selection — plain `@State`, so nothing publishes on a keypress.
+    @State private var detailScroll = DetailScrollIntent()
 
     private var isQueryEmpty: Bool { vm.query.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -366,8 +366,8 @@ struct RootPaletteView: View {
                 moveMenu(1)
                 return .handled
             }
-            if let detail = dictionaryDetail {
-                moveDetail(1, in: detail)
+            if dictionaryDetail != nil {
+                scrollDetail(1)
             } else if vm.mode == .emoji {
                 moveEmojiRow(1)
             } else {
@@ -381,8 +381,8 @@ struct RootPaletteView: View {
                 moveMenu(-1)
                 return .handled
             }
-            if let detail = dictionaryDetail {
-                moveDetail(-1, in: detail)
+            if dictionaryDetail != nil {
+                scrollDetail(-1)
             } else if vm.mode == .emoji {
                 moveEmojiRow(-1)
             } else {
@@ -661,8 +661,10 @@ struct RootPaletteView: View {
             }
         case .dictionary:
             if let detail = dictionaryDetail {
-                DictionaryDetail(
-                    entry: detail, focusedSense: detailSense, scrollToken: scrollToken)
+                // Keyed on the entry so opening a different word starts at the top rather than
+                // inheriting the last one's scroll offset.
+                DictionaryDetail(entry: detail, scroll: detailScroll)
+                    .id(detail.id)
             } else if dictionary.isSearching && dicts.isEmpty {
                 EmptyResults(text: "Searching…")
             } else if dicts.isEmpty {
@@ -826,14 +828,10 @@ struct RootPaletteView: View {
         emojiScroll = EmojiScrollIntent(kind: .follow)
     }
 
-    /// Walk the detail view a sense at a time. Anchoring on senses rather than a pixel step means
-    /// ↓ always lands on something readable, and it reuses the `ScrollViewReader` every list already
-    /// has rather than reaching for scroll-offset APIs.
-    private func moveDetail(_ delta: Int, in entry: DefinitionEntry) {
-        let senses = entry.definition.sections.reduce(0) { $0 + $1.senses.count }
-        guard senses > 0 else { return }
-        detailSense = min(max(detailSense + delta, 0), senses - 1)
-        scrollToken = UUID()
+    /// Scroll the detail view. The clamping lives in the view, which is the only place that knows
+    /// the content's extent — this just states the direction.
+    private func scrollDetail(_ steps: Int) {
+        detailScroll = DetailScrollIntent(steps: steps)
     }
 
     /// Move the open menu's highlight, clamped at the ends (no wrap — consistent with `move`).
@@ -917,7 +915,7 @@ struct RootPaletteView: View {
                 return
             }
             guard let entry = selectedDefinition else { return }
-            detailSense = 0
+            detailScroll = DetailScrollIntent()
             dictionaryDetail = entry
         case .emoji:
             guard emojiResults.indices.contains(selection) else { return }
