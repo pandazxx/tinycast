@@ -21,11 +21,6 @@ final class DictionaryStore: ObservableObject {
     /// True between a query arriving and its results landing, so the list can say so instead of
     /// flashing "No definitions found" on the way to a result.
     @Published private(set) var isSearching = false
-    /// `results + suggestions` in rendered order. Plain, not `@Published` — read at event time by
-    /// the key handlers, which must not touch a publisher while SwiftUI is dispatching. Every other
-    /// mode reaches its rows through a method call for the same reason; reading the published array
-    /// here is what made ↑/↓ fault with "publishing changes from within view updates".
-    private(set) var rows: [DefinitionEntry] = []
 
     /// One round of disk reads per pause in typing rather than one per keystroke. Measured on a real
     /// session the work itself is 12–68 ms, so the wait was the largest single term in how long a
@@ -57,7 +52,6 @@ final class DictionaryStore: ObservableObject {
             isSearching = false
             results = []
             suggestions = []
-            rows = []
             return
         }
         let key = partial.lowercased()
@@ -67,7 +61,6 @@ final class DictionaryStore: ObservableObject {
             isSearching = false
             results = cached.results
             suggestions = cached.suggestions
-            rows = cached.results + cached.suggestions
             Self.log.debug(
                 "define \(partial, privacy: .private): cache hit, \(cached.results.count + cached.suggestions.count, privacy: .public) results"
             )
@@ -177,6 +170,5 @@ final class DictionaryStore: ObservableObject {
         isSearching = false
         results = found.results
         suggestions = found.suggestions
-        rows = found.results + found.suggestions
     }
 }
